@@ -107,7 +107,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         var screen     = Screen.PrimaryScreen!.WorkingArea;
         int totalWidth = ordered.Count * CatSize + (ordered.Count - 1) * CatGap;
         int startX     = screen.Left + (screen.Width - totalWidth) / 2;
-        int y          = screen.Bottom - CatSize - 4;
+        int y          = screen.Bottom - CatSize;
 
         for (int i = 0; i < ordered.Count; i++)
         {
