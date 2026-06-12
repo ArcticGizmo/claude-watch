@@ -2,10 +2,14 @@ namespace ClaudeWatch;
 
 internal sealed class OverlayApplicationContext : ApplicationContext
 {
+    private const int CatSize = 28;
+    private const int CatGap  = 6;
+
     private readonly OverlayForm _overlay;
     private readonly SessionMonitor _monitor;
     private readonly System.Windows.Forms.Timer _pollTimer;
     private readonly NotifyIcon _notifyIcon;
+    private readonly Dictionary<string, SessionCatForm> _cats = new();
 
     public OverlayApplicationContext()
     {
@@ -47,6 +51,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private void OnSessionsChanged(IReadOnlyList<ClaudeSession> sessions)
     {
         _overlay.UpdateSessions(sessions);
+        UpdateCats(sessions);
 
         var worst   = sessions.Count == 0
             ? SessionStatus.Idle
@@ -64,6 +69,53 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         };
     }
 
+    private void UpdateCats(IReadOnlyList<ClaudeSession> sessions)
+    {
+        var activePids = sessions.Select(s => s.Pid).ToHashSet();
+
+        foreach (var pid in _cats.Keys.Where(k => !activePids.Contains(k)).ToList())
+        {
+            _cats[pid].Close();
+            _cats[pid].Dispose();
+            _cats.Remove(pid);
+        }
+
+        foreach (var session in sessions)
+        {
+            if (_cats.TryGetValue(session.Pid, out var cat))
+                cat.UpdateSession(session);
+            else
+            {
+                var form = new SessionCatForm(session);
+                form.Show();
+                _cats[session.Pid] = form;
+            }
+        }
+
+        RepositionCats(sessions);
+    }
+
+    private void RepositionCats(IReadOnlyList<ClaudeSession> sessions)
+    {
+        if (sessions.Count == 0) return;
+
+        var ordered = sessions
+            .OrderByDescending(s => (int)s.Status)
+            .ThenByDescending(s => s.LastUpdated)
+            .ToList();
+
+        var screen     = Screen.PrimaryScreen!.WorkingArea;
+        int totalWidth = ordered.Count * CatSize + (ordered.Count - 1) * CatGap;
+        int startX     = screen.Left + (screen.Width - totalWidth) / 2;
+        int y          = screen.Bottom - CatSize - 4;
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            if (_cats.TryGetValue(ordered[i].Pid, out var cat))
+                cat.Location = new Point(startX + i * (CatSize + CatGap), y);
+        }
+    }
+
     private void OnNeedsAttention(ClaudeSession session)
     {
         _overlay.TriggerAttention();
@@ -78,6 +130,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         _pollTimer.Stop();
         _notifyIcon.Visible = false;
+        foreach (var cat in _cats.Values) cat.Close();
         _overlay.Close();
     }
 
@@ -89,6 +142,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _monitor.Dispose();
             _notifyIcon.Icon?.Dispose();
             _notifyIcon.Dispose();
+            foreach (var cat in _cats.Values) cat.Dispose();
+            _cats.Clear();
             _overlay.Dispose();
         }
         base.Dispose(disposing);
