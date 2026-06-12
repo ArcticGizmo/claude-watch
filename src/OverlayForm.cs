@@ -287,7 +287,7 @@ internal sealed class OverlayForm : Form
     // ── Mouse interaction ────────────────────────────────────────────────────
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left)
+        if (e.Button == MouseButtons.Left && e.Y < CompactHeight)
         {
             _dragging       = true;
             _wasDrag        = false;
