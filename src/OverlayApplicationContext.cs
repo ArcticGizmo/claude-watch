@@ -99,7 +99,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private void AcknowledgeSession(string pid)
     {
         _monitor.Acknowledge(pid);
-        _monitor.Scan();
+        _overlay.BeginInvoke(_monitor.Scan);
     }
 
     private void RepositionCats(IReadOnlyList<ClaudeSession> sessions)

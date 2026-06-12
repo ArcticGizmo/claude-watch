@@ -90,6 +90,14 @@ internal sealed class OverlayForm : Form
         if (_sortedSessions.Count == 0)
             _expanded = false;
 
+        // Stop flashing if nothing needs attention anymore
+        if (_attentionFlash && _sessions.All(s => s.Status != SessionStatus.NeedsAttention))
+        {
+            _flashTimer.Stop();
+            _flashStopTimer.Stop();
+            _attentionFlash = false;
+        }
+
         UpdateHeight();
         Invalidate();
     }
