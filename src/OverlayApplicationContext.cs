@@ -104,15 +104,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             .ThenByDescending(s => s.LastUpdated)
             .ToList();
 
-        var screen     = Screen.PrimaryScreen!.WorkingArea;
-        int totalWidth = ordered.Count * CatSize + (ordered.Count - 1) * CatGap;
-        int startX     = screen.Left + (screen.Width - totalWidth) / 2;
-        int y          = screen.Bottom - CatSize;
+        var screen  = Screen.PrimaryScreen!.WorkingArea;
+        int rightX  = screen.Right - 16;
+        int y       = screen.Bottom - CatSize;
 
         for (int i = 0; i < ordered.Count; i++)
         {
             if (_cats.TryGetValue(ordered[i].Pid, out var cat))
-                cat.Location = new Point(startX + i * (CatSize + CatGap), y);
+                cat.Location = new Point(rightX - (i + 1) * CatSize - i * CatGap, y);
         }
     }
 
