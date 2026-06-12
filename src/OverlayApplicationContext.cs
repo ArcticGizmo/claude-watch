@@ -16,6 +16,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay = new OverlayForm();
         _overlay.FormClosed    += (_, _) => ExitThread();
         _overlay.ExitRequested += (_, _) => Exit();
+        _overlay.SessionFocused += AcknowledgeSession;
 
         // Tray icon: provides balloon-tip notifications and a fallback right-click exit
         _notifyIcon = new NotifyIcon
@@ -86,13 +87,19 @@ internal sealed class OverlayApplicationContext : ApplicationContext
                 cat.UpdateSession(session);
             else
             {
-                var form = new SessionCatForm(session);
+                var form = new SessionCatForm(session, AcknowledgeSession);
                 form.Show();
                 _cats[session.Pid] = form;
             }
         }
 
         RepositionCats(sessions);
+    }
+
+    private void AcknowledgeSession(string pid)
+    {
+        _monitor.Acknowledge(pid);
+        _monitor.Scan();
     }
 
     private void RepositionCats(IReadOnlyList<ClaudeSession> sessions)

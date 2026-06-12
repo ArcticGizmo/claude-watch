@@ -9,11 +9,13 @@ internal sealed class SessionCatForm : Form
     private static readonly Color IdleColor      = Color.FromArgb(100, 116, 139);
 
     private readonly CatTooltipForm _tooltip = new();
+    private readonly Action<string> _onFocused;
 
     public ClaudeSession Session { get; private set; }
 
-    public SessionCatForm(ClaudeSession session)
+    public SessionCatForm(ClaudeSession session, Action<string> onFocused)
     {
+        _onFocused = onFocused;
         Session         = session;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar   = false;
@@ -43,8 +45,12 @@ internal sealed class SessionCatForm : Form
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left && int.TryParse(Session.Pid, out int pid))
-            NativeMethods.FocusTerminalForProcess(pid);
+        if (e.Button == MouseButtons.Left)
+        {
+            _onFocused(Session.Pid);
+            if (int.TryParse(Session.Pid, out int pid))
+                NativeMethods.FocusTerminalForProcess(pid);
+        }
         base.OnMouseUp(e);
     }
 

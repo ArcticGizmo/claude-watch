@@ -45,6 +45,7 @@ internal sealed class OverlayForm : Form
     private readonly System.Windows.Forms.Timer _flashStopTimer;
 
     public event EventHandler? ExitRequested;
+    public event Action<string>? SessionFocused;
 
     // ── Construction ──────────────────────────────────────────────────────────
     public OverlayForm()
@@ -331,8 +332,10 @@ internal sealed class OverlayForm : Form
             int row = HitTestRow(e.Location);
             if (row >= 0)
             {
-                if (int.TryParse(_sortedSessions[row].Pid, out int pid))
-                    NativeMethods.FocusTerminalForProcess(pid);
+                var pid = _sortedSessions[row].Pid;
+                SessionFocused?.Invoke(pid);
+                if (int.TryParse(pid, out int pidInt))
+                    NativeMethods.FocusTerminalForProcess(pidInt);
             }
             else if (e.Y < CompactHeight && _sessions.Count > 0)
             {
