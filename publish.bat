@@ -4,7 +4,7 @@ dotnet publish -c Release -r win-x64 --self-contained true ^
     -p:EnableCompressionInSingleFile=true ^
     -p:DebugType=embedded
 
-copy /Y bin\Release\net10.0-windows\win-x64\publish\ClaudeWatch.exe ClaudeWatch.exe
+copy /Y src\bin\Release\net10.0-windows\win-x64\publish\ClaudeWatch.exe ClaudeWatch.exe
 
 echo.
 echo Output: ClaudeWatch.exe
