@@ -6,8 +6,8 @@ namespace ClaudeWatch;
 /// <summary>
 /// Floating always-on-top status widget.
 /// Compact bar by default; click the header to expand to per-session rows.
-/// Drag anywhere to reposition. Right-click for the exit menu.
-/// Clicking a session row copies its working directory to the clipboard.
+/// Drag the header to reposition. Right-click for the exit menu.
+/// Clicking a session row focuses the terminal running that session.
 /// </summary>
 internal sealed class OverlayForm : Form
 {
@@ -331,10 +331,8 @@ internal sealed class OverlayForm : Form
             int row = HitTestRow(e.Location);
             if (row >= 0)
             {
-                // Copy working directory for this session
-                var cwd = _sortedSessions[row].Cwd;
-                if (!string.IsNullOrEmpty(cwd))
-                    Clipboard.SetText(cwd);
+                if (int.TryParse(_sortedSessions[row].Pid, out int pid))
+                    NativeMethods.FocusTerminalForProcess(pid);
             }
             else if (e.Y < CompactHeight && _sessions.Count > 0)
             {
