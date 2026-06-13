@@ -2,23 +2,23 @@ namespace ClaudeWatch;
 
 internal sealed class OverlayApplicationContext : ApplicationContext
 {
-    private const int CatGap = 6;
+    private const int IndicatorGap = 6;
 
     private readonly OverlayForm _overlay;
     private readonly SessionMonitor _monitor;
     private readonly System.Windows.Forms.Timer _pollTimer;
     private readonly NotifyIcon _notifyIcon;
-    private readonly Dictionary<string, SessionCatForm> _cats = new();
+    private readonly Dictionary<string, SessionIndicatorForm> _indicators = new();
     private readonly AppSettings _settings;
     private readonly ToolStripMenuItem _displayMenu;
 
     private IReadOnlyList<ClaudeSession> _currentSessions = [];
-    private CatStyle _currentStyle;
+    private IndicatorStyle _currentStyle;
 
     public OverlayApplicationContext()
     {
         _settings     = AppSettings.Load();
-        _currentStyle = CatStyle.FromName(_settings.DisplayStyle);
+        _currentStyle = IndicatorStyle.FromName(_settings.DisplayStyle);
 
         _overlay = new OverlayForm();
         _overlay.FormClosed     += (_, _) => ExitThread();
@@ -61,7 +61,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private ToolStripMenuItem BuildDisplayMenu()
     {
         var menu = new ToolStripMenuItem("Display");
-        foreach (var style in CatStyle.All)
+        foreach (var style in IndicatorStyle.All)
         {
             var item = new ToolStripMenuItem(style.Name)
             {
@@ -77,23 +77,23 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private void OnDisplayStyleSelected(object? sender, EventArgs e)
     {
-        if (sender is not ToolStripMenuItem item || item.Tag is not CatStyle style) return;
+        if (sender is not ToolStripMenuItem item || item.Tag is not IndicatorStyle style) return;
         if (style == _currentStyle) return;
 
-        _currentStyle              = style;
-        _settings.DisplayStyle     = style.Name;
+        _currentStyle          = style;
+        _settings.DisplayStyle = style.Name;
         _settings.Save();
 
         foreach (ToolStripMenuItem child in _displayMenu.DropDownItems)
             child.Checked = child.Tag == style;
 
-        UpdateCats(_currentSessions);
+        UpdateIndicators(_currentSessions);
     }
 
     private void OnSessionsChanged(IReadOnlyList<ClaudeSession> sessions)
     {
         _overlay.UpdateSessions(sessions);
-        UpdateCats(sessions);
+        UpdateIndicators(sessions);
 
         var worst = sessions.Count == 0
             ? SessionStatus.Idle
@@ -111,42 +111,42 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         };
     }
 
-    private void UpdateCats(IReadOnlyList<ClaudeSession> sessions)
+    private void UpdateIndicators(IReadOnlyList<ClaudeSession> sessions)
     {
         _currentSessions = sessions;
 
         if (!_currentStyle.ShowForms)
         {
-            foreach (var cat in _cats.Values) { cat.Close(); cat.Dispose(); }
-            _cats.Clear();
+            foreach (var indicator in _indicators.Values) { indicator.Close(); indicator.Dispose(); }
+            _indicators.Clear();
             return;
         }
 
         var activePids = sessions.Select(s => s.Pid).ToHashSet();
 
-        foreach (var pid in _cats.Keys.Where(k => !activePids.Contains(k)).ToList())
+        foreach (var pid in _indicators.Keys.Where(k => !activePids.Contains(k)).ToList())
         {
-            _cats[pid].Close();
-            _cats[pid].Dispose();
-            _cats.Remove(pid);
+            _indicators[pid].Close();
+            _indicators[pid].Dispose();
+            _indicators.Remove(pid);
         }
 
         foreach (var session in sessions)
         {
-            if (_cats.TryGetValue(session.Pid, out var cat))
+            if (_indicators.TryGetValue(session.Pid, out var indicator))
             {
-                cat.UpdateStyle(_currentStyle);
-                cat.UpdateSession(session);
+                indicator.UpdateStyle(_currentStyle);
+                indicator.UpdateSession(session);
             }
             else
             {
-                var form = new SessionCatForm(session, _currentStyle, AcknowledgeSession);
+                var form = new SessionIndicatorForm(session, _currentStyle, AcknowledgeSession);
                 form.Show();
-                _cats[session.Pid] = form;
+                _indicators[session.Pid] = form;
             }
         }
 
-        RepositionCats(sessions);
+        RepositionIndicators(sessions);
     }
 
     private void AcknowledgeSession(string pid)
@@ -155,7 +155,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.BeginInvoke(_monitor.Scan);
     }
 
-    private void RepositionCats(IReadOnlyList<ClaudeSession> sessions)
+    private void RepositionIndicators(IReadOnlyList<ClaudeSession> sessions)
     {
         if (sessions.Count == 0) return;
 
@@ -165,14 +165,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             .ToList();
 
         var screen = Screen.PrimaryScreen!.WorkingArea;
-        int size   = SessionCatForm.CatSize;
+        int size   = SessionIndicatorForm.IndicatorSize;
         int rightX = screen.Right - 16;
         int y      = screen.Bottom - size;
 
         for (int i = 0; i < ordered.Count; i++)
         {
-            if (_cats.TryGetValue(ordered[i].Pid, out var cat))
-                cat.Location = new Point(rightX - (i + 1) * size - i * CatGap, y);
+            if (_indicators.TryGetValue(ordered[i].Pid, out var indicator))
+                indicator.Location = new Point(rightX - (i + 1) * size - i * IndicatorGap, y);
         }
     }
 
@@ -190,7 +190,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         _pollTimer.Stop();
         _notifyIcon.Visible = false;
-        foreach (var cat in _cats.Values) cat.Close();
+        foreach (var indicator in _indicators.Values) indicator.Close();
         _overlay.Close();
     }
 
@@ -202,8 +202,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _monitor.Dispose();
             _notifyIcon.Icon?.Dispose();
             _notifyIcon.Dispose();
-            foreach (var cat in _cats.Values) cat.Dispose();
-            _cats.Clear();
+            foreach (var indicator in _indicators.Values) indicator.Dispose();
+            _indicators.Clear();
             _overlay.Dispose();
         }
         base.Dispose(disposing);

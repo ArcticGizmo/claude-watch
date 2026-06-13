@@ -1,16 +1,16 @@
 namespace ClaudeWatch;
 
-internal sealed class SessionCatForm : Form
+internal sealed class SessionIndicatorForm : Form
 {
-    internal const int CatSize = 42;
+    internal const int IndicatorSize = 42;
 
-    private readonly CatTooltipForm _tooltip = new();
+    private readonly IndicatorTooltipForm _tooltip = new();
     private readonly Action<string> _onFocused;
-    private CatStyle _style;
+    private IndicatorStyle _style;
 
     public ClaudeSession Session { get; private set; }
 
-    public SessionCatForm(ClaudeSession session, CatStyle style, Action<string> onFocused)
+    public SessionIndicatorForm(ClaudeSession session, IndicatorStyle style, Action<string> onFocused)
     {
         _onFocused = onFocused;
         _style     = style;
@@ -18,7 +18,7 @@ internal sealed class SessionCatForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar   = false;
         TopMost         = true;
-        ClientSize      = new Size(CatSize, CatSize);
+        ClientSize      = new Size(IndicatorSize, IndicatorSize);
         Cursor          = Cursors.Hand;
     }
 
@@ -28,7 +28,7 @@ internal sealed class SessionCatForm : Form
         Refresh();
     }
 
-    public void UpdateStyle(CatStyle style)
+    public void UpdateStyle(IndicatorStyle style)
     {
         if (_style == style) return;
         _style = style;
@@ -43,7 +43,7 @@ internal sealed class SessionCatForm : Form
 
     protected override void OnMouseEnter(EventArgs e)
     {
-        _tooltip.ShowFor(Session, Location, CatSize);
+        _tooltip.ShowFor(Session, Location, IndicatorSize);
         base.OnMouseEnter(e);
     }
 
@@ -84,6 +84,6 @@ internal sealed class SessionCatForm : Form
     private new void Refresh()
     {
         if (!IsHandleCreated) return;
-        _style.Apply(Handle, Session.Status, CatSize, Location);
+        _style.Apply(Handle, Session.Status, IndicatorSize, Location);
     }
 }

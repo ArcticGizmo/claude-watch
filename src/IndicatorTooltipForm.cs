@@ -3,7 +3,7 @@ using System.Drawing.Text;
 
 namespace ClaudeWatch;
 
-internal sealed class CatTooltipForm : Form
+internal sealed class IndicatorTooltipForm : Form
 {
     private const int HorizPad = 10;
     private const int VertPad  = 6;
@@ -20,7 +20,7 @@ internal sealed class CatTooltipForm : Form
     private string _statusText  = "";
     private Color  _statusColor = IdleColor;
 
-    public CatTooltipForm()
+    public IndicatorTooltipForm()
     {
         FormBorderStyle   = FormBorderStyle.None;
         ShowInTaskbar     = false;
@@ -45,7 +45,7 @@ internal sealed class CatTooltipForm : Form
         }
     }
 
-    public void ShowFor(ClaudeSession session, Point catLocation, int catSize)
+    public void ShowFor(ClaudeSession session, Point indicatorLocation, int indicatorSize)
     {
         _projectName = session.ProjectName;
         (_statusText, _statusColor) = session.Status switch
@@ -66,7 +66,7 @@ internal sealed class CatTooltipForm : Form
         int h = (int)nameSz.Height + (int)statusSz.Height + VertPad * 2 + 4;
 
         ClientSize = new Size(w, h);
-        Location   = new Point(catLocation.X + catSize - w, catLocation.Y - h - 4);
+        Location   = new Point(indicatorLocation.X + indicatorSize - w, indicatorLocation.Y - h - 4);
 
         Invalidate();
         Show();
