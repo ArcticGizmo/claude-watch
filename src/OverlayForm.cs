@@ -83,8 +83,7 @@ internal sealed class OverlayForm : Form
     {
         _sessions       = sessions;
         _sortedSessions = [.. sessions
-            .OrderByDescending(s => (int)s.Status)
-            .ThenByDescending(s => s.LastUpdated)];
+            .OrderBy(s => s.ProjectName, StringComparer.OrdinalIgnoreCase)];
 
         // Auto-collapse when all sessions disappear
         if (_sortedSessions.Count == 0)

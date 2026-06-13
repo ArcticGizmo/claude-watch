@@ -160,8 +160,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         if (sessions.Count == 0) return;
 
         var ordered = sessions
-            .OrderByDescending(s => (int)s.Status)
-            .ThenByDescending(s => s.LastUpdated)
+            .OrderByDescending(s => s.ProjectName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var screen = Screen.PrimaryScreen!.WorkingArea;
