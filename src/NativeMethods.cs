@@ -83,7 +83,9 @@ internal static class NativeMethods
             {
                 int si = y * bd.Stride + x * 4;
                 int di = (y * size  + x) * 4;
-                byte a       = src[si + 3];
+                // Alpha=0 pixels are click-through; clamp to 1 so the full square is hittable
+                // while remaining visually imperceptible (1/255 ≈ 0.4% opacity).
+                byte a       = Math.Max((byte)1, src[si + 3]);
                 dst[di]     = (byte)(src[si]     * a / 255);
                 dst[di + 1] = (byte)(src[si + 1] * a / 255);
                 dst[di + 2] = (byte)(src[si + 2] * a / 255);
