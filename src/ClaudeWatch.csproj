@@ -9,4 +9,9 @@
     <AssemblyName>ClaudeWatch</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="sprites\duck-sleep.png" />
+    <EmbeddedResource Include="sprites\duck-working.png" />
+    <EmbeddedResource Include="sprites\duck-alert.png" />
+  </ItemGroup>
 </Project>

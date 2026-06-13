@@ -2,7 +2,7 @@ namespace ClaudeWatch;
 
 internal sealed class OverlayApplicationContext : ApplicationContext
 {
-    private const int CatSize = 28;
+    private const int CatSize = SessionCatForm.CatSize;
     private const int CatGap  = 6;
 
     private readonly OverlayForm _overlay;

@@ -2,11 +2,11 @@ namespace ClaudeWatch;
 
 internal sealed class SessionCatForm : Form
 {
-    private const int CatSize = 28;
+    internal const int CatSize = 42; // 28 * 1.5
 
-    private static readonly Color RunningColor   = Color.FromArgb(34,  197, 94);
-    private static readonly Color AttentionColor = Color.FromArgb(251, 146, 60);
-    private static readonly Color IdleColor      = Color.FromArgb(100, 116, 139);
+    private static readonly Bitmap SleepImage   = LoadSprite("duck-sleep.png");
+    private static readonly Bitmap WorkingImage  = LoadSprite("duck-working.png");
+    private static readonly Bitmap AlertImage    = LoadSprite("duck-alert.png");
 
     private readonly CatTooltipForm _tooltip = new();
     private readonly Action<string> _onFocused;
@@ -22,13 +22,18 @@ internal sealed class SessionCatForm : Form
         TopMost         = true;
         ClientSize      = new Size(CatSize, CatSize);
         Cursor          = Cursors.Hand;
-        BackColor       = StatusColor(session.Status);
     }
 
     public void UpdateSession(ClaudeSession session)
     {
-        Session   = session;
-        BackColor = StatusColor(session.Status);
+        Session = session;
+        RefreshSprite();
+    }
+
+    protected override void OnLocationChanged(EventArgs e)
+    {
+        base.OnLocationChanged(e);
+        RefreshSprite();
     }
 
     protected override void OnMouseEnter(EventArgs e)
@@ -59,7 +64,8 @@ internal sealed class SessionCatForm : Form
         get
         {
             var cp = base.CreateParams;
-            cp.ExStyle |= 0x80; // WS_EX_TOOLWINDOW — no taskbar / Alt+Tab entry
+            cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW
+            cp.ExStyle |= 0x00080000; // WS_EX_LAYERED
             return cp;
         }
     }
@@ -70,10 +76,23 @@ internal sealed class SessionCatForm : Form
         base.Dispose(disposing);
     }
 
-    private static Color StatusColor(SessionStatus s) => s switch
+    private void RefreshSprite()
     {
-        SessionStatus.Running        => RunningColor,
-        SessionStatus.NeedsAttention => AttentionColor,
-        _                            => IdleColor,
+        if (!IsHandleCreated) return;
+        NativeMethods.ApplyLayeredBitmap(Handle, StatusImage(Session.Status), CatSize, Location);
+    }
+
+    private static Bitmap StatusImage(SessionStatus s) => s switch
+    {
+        SessionStatus.Running        => WorkingImage,
+        SessionStatus.NeedsAttention => AlertImage,
+        _                            => SleepImage,
     };
+
+    private static Bitmap LoadSprite(string name)
+    {
+        var stream = System.Reflection.Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream($"ClaudeWatch.sprites.{name}")!;
+        return new Bitmap(stream);
+    }
 }
