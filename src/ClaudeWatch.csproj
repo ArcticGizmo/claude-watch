@@ -16,5 +16,8 @@
     <EmbeddedResource Include="sprites\cat-sleep.png" />
     <EmbeddedResource Include="sprites\cat-working.png" />
     <EmbeddedResource Include="sprites\cat-alert.png" />
+    <EmbeddedResource Include="sprites\square-sleep.png" />
+    <EmbeddedResource Include="sprites\square-working.png" />
+    <EmbeddedResource Include="sprites\square-alert.png" />
   </ItemGroup>
 </Project>

@@ -17,7 +17,10 @@ internal abstract class IndicatorStyle
     // ── Built-in styles ──────────────────────────────────────────────────────
 
     public static readonly IndicatorStyle None    = new NoneIndicatorStyle();
-    public static readonly IndicatorStyle Squares = new SquaresIndicatorStyle();
+    public static readonly IndicatorStyle Squares = new SpriteIndicatorStyle("Squares",
+        LoadSprite("square-sleep.png"),
+        LoadSprite("square-working.png"),
+        LoadSprite("square-alert.png"));
     public static readonly IndicatorStyle Ducks   = new SpriteIndicatorStyle("Ducks",
         LoadSprite("duck-sleep.png"),
         LoadSprite("duck-working.png"),
@@ -47,29 +50,6 @@ internal sealed class NoneIndicatorStyle : IndicatorStyle
     public override string Name    => "None";
     public override bool ShowForms => false;
     public override void Apply(IntPtr hwnd, SessionStatus status, int size, Point location) { }
-}
-
-internal sealed class SquaresIndicatorStyle : IndicatorStyle
-{
-    private static readonly Color RunningColor   = Color.FromArgb(34,  197,  94);
-    private static readonly Color AttentionColor = Color.FromArgb(251, 146,  60);
-    private static readonly Color IdleColor      = Color.FromArgb(100, 116, 139);
-
-    public override string Name => "Squares";
-
-    public override void Apply(IntPtr hwnd, SessionStatus status, int size, Point location)
-    {
-        using var bmp = new Bitmap(1, 1, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-        bmp.SetPixel(0, 0, StatusColor(status));
-        NativeMethods.ApplyLayeredBitmap(hwnd, bmp, size, location);
-    }
-
-    private static Color StatusColor(SessionStatus s) => s switch
-    {
-        SessionStatus.Running        => RunningColor,
-        SessionStatus.NeedsAttention => AttentionColor,
-        _                            => IdleColor,
-    };
 }
 
 /// <summary>
