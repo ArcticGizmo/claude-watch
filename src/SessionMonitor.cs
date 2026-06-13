@@ -117,5 +117,7 @@ internal sealed class SessionMonitor : IDisposable
         catch { return false; }
     }
 
+    public void Acknowledge(string pid) => _idleSince.Remove(pid);
+
     public void Dispose() { }
 }

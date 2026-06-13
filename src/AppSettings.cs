@@ -1,0 +1,34 @@
+namespace ClaudeWatch;
+
+using System.Text.Json;
+
+internal sealed class AppSettings
+{
+    private static readonly string FilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "ClaudeWatch", "settings.json");
+
+    public string DisplayStyle { get; set; } = "Ducks";
+
+    public static AppSettings Load()
+    {
+        try
+        {
+            if (File.Exists(FilePath))
+                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new();
+        }
+        catch { }
+        return new();
+    }
+
+    public void Save()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            File.WriteAllText(FilePath,
+                JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch { }
+    }
+}
