@@ -2,23 +2,29 @@ namespace ClaudeWatch;
 
 internal sealed class OverlayApplicationContext : ApplicationContext
 {
-    private const int CatSize = SessionCatForm.CatSize;
-    private const int CatGap  = 6;
+    private const int CatGap = 6;
 
     private readonly OverlayForm _overlay;
     private readonly SessionMonitor _monitor;
     private readonly System.Windows.Forms.Timer _pollTimer;
     private readonly NotifyIcon _notifyIcon;
     private readonly Dictionary<string, SessionCatForm> _cats = new();
+    private readonly AppSettings _settings;
+    private readonly ToolStripMenuItem _displayMenu;
+
+    private IReadOnlyList<ClaudeSession> _currentSessions = [];
+    private CatStyle _currentStyle;
 
     public OverlayApplicationContext()
     {
+        _settings     = AppSettings.Load();
+        _currentStyle = CatStyle.FromName(_settings.DisplayStyle);
+
         _overlay = new OverlayForm();
-        _overlay.FormClosed    += (_, _) => ExitThread();
-        _overlay.ExitRequested += (_, _) => Exit();
+        _overlay.FormClosed     += (_, _) => ExitThread();
+        _overlay.ExitRequested  += (_, _) => Exit();
         _overlay.SessionFocused += AcknowledgeSession;
 
-        // Tray icon: provides balloon-tip notifications and a fallback right-click exit
         _notifyIcon = new NotifyIcon
         {
             Visible = true,
@@ -27,12 +33,15 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         };
         _notifyIcon.DoubleClick += (_, _) => { _overlay.BringToFront(); _overlay.TopMost = true; };
 
+        _displayMenu = BuildDisplayMenu();
+
         var trayMenu = new ContextMenuStrip();
         var showItem = new ToolStripMenuItem("Show Overlay");
         showItem.Click += (_, _) => { _overlay.BringToFront(); _overlay.TopMost = true; };
         var exitItem = new ToolStripMenuItem("Exit Claude Watch");
         exitItem.Click += (_, _) => Exit();
         trayMenu.Items.Add(showItem);
+        trayMenu.Items.Add(_displayMenu);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
         _notifyIcon.ContextMenuStrip = trayMenu;
@@ -49,12 +58,44 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.Show();
     }
 
+    private ToolStripMenuItem BuildDisplayMenu()
+    {
+        var menu = new ToolStripMenuItem("Display");
+        foreach (var style in CatStyle.All)
+        {
+            var item = new ToolStripMenuItem(style.Name)
+            {
+                Checked      = style == _currentStyle,
+                CheckOnClick = false,
+                Tag          = style,
+            };
+            item.Click += OnDisplayStyleSelected;
+            menu.DropDownItems.Add(item);
+        }
+        return menu;
+    }
+
+    private void OnDisplayStyleSelected(object? sender, EventArgs e)
+    {
+        if (sender is not ToolStripMenuItem item || item.Tag is not CatStyle style) return;
+        if (style == _currentStyle) return;
+
+        _currentStyle              = style;
+        _settings.DisplayStyle     = style.Name;
+        _settings.Save();
+
+        foreach (ToolStripMenuItem child in _displayMenu.DropDownItems)
+            child.Checked = child.Tag == style;
+
+        UpdateCats(_currentSessions);
+    }
+
     private void OnSessionsChanged(IReadOnlyList<ClaudeSession> sessions)
     {
         _overlay.UpdateSessions(sessions);
         UpdateCats(sessions);
 
-        var worst   = sessions.Count == 0
+        var worst = sessions.Count == 0
             ? SessionStatus.Idle
             : (SessionStatus)sessions.Max(s => (int)s.Status);
 
@@ -72,6 +113,15 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private void UpdateCats(IReadOnlyList<ClaudeSession> sessions)
     {
+        _currentSessions = sessions;
+
+        if (!_currentStyle.ShowForms)
+        {
+            foreach (var cat in _cats.Values) { cat.Close(); cat.Dispose(); }
+            _cats.Clear();
+            return;
+        }
+
         var activePids = sessions.Select(s => s.Pid).ToHashSet();
 
         foreach (var pid in _cats.Keys.Where(k => !activePids.Contains(k)).ToList())
@@ -84,10 +134,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         foreach (var session in sessions)
         {
             if (_cats.TryGetValue(session.Pid, out var cat))
+            {
+                cat.UpdateStyle(_currentStyle);
                 cat.UpdateSession(session);
+            }
             else
             {
-                var form = new SessionCatForm(session, AcknowledgeSession);
+                var form = new SessionCatForm(session, _currentStyle, AcknowledgeSession);
                 form.Show();
                 _cats[session.Pid] = form;
             }
@@ -111,14 +164,15 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             .ThenByDescending(s => s.LastUpdated)
             .ToList();
 
-        var screen  = Screen.PrimaryScreen!.WorkingArea;
-        int rightX  = screen.Right - 16;
-        int y       = screen.Bottom - CatSize;
+        var screen = Screen.PrimaryScreen!.WorkingArea;
+        int size   = SessionCatForm.CatSize;
+        int rightX = screen.Right - 16;
+        int y      = screen.Bottom - size;
 
         for (int i = 0; i < ordered.Count; i++)
         {
             if (_cats.TryGetValue(ordered[i].Pid, out var cat))
-                cat.Location = new Point(rightX - (i + 1) * CatSize - i * CatGap, y);
+                cat.Location = new Point(rightX - (i + 1) * size - i * CatGap, y);
         }
     }
 

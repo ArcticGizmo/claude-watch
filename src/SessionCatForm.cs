@@ -2,21 +2,19 @@ namespace ClaudeWatch;
 
 internal sealed class SessionCatForm : Form
 {
-    internal const int CatSize = 42; // 28 * 1.5
-
-    private static readonly Bitmap SleepImage   = LoadSprite("duck-sleep.png");
-    private static readonly Bitmap WorkingImage  = LoadSprite("duck-working.png");
-    private static readonly Bitmap AlertImage    = LoadSprite("duck-alert.png");
+    internal const int CatSize = 42;
 
     private readonly CatTooltipForm _tooltip = new();
     private readonly Action<string> _onFocused;
+    private CatStyle _style;
 
     public ClaudeSession Session { get; private set; }
 
-    public SessionCatForm(ClaudeSession session, Action<string> onFocused)
+    public SessionCatForm(ClaudeSession session, CatStyle style, Action<string> onFocused)
     {
         _onFocused = onFocused;
-        Session         = session;
+        _style     = style;
+        Session    = session;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar   = false;
         TopMost         = true;
@@ -27,13 +25,20 @@ internal sealed class SessionCatForm : Form
     public void UpdateSession(ClaudeSession session)
     {
         Session = session;
-        RefreshSprite();
+        Refresh();
+    }
+
+    public void UpdateStyle(CatStyle style)
+    {
+        if (_style == style) return;
+        _style = style;
+        Refresh();
     }
 
     protected override void OnLocationChanged(EventArgs e)
     {
         base.OnLocationChanged(e);
-        RefreshSprite();
+        Refresh();
     }
 
     protected override void OnMouseEnter(EventArgs e)
@@ -76,23 +81,9 @@ internal sealed class SessionCatForm : Form
         base.Dispose(disposing);
     }
 
-    private void RefreshSprite()
+    private new void Refresh()
     {
         if (!IsHandleCreated) return;
-        NativeMethods.ApplyLayeredBitmap(Handle, StatusImage(Session.Status), CatSize, Location);
-    }
-
-    private static Bitmap StatusImage(SessionStatus s) => s switch
-    {
-        SessionStatus.Running        => WorkingImage,
-        SessionStatus.NeedsAttention => AlertImage,
-        _                            => SleepImage,
-    };
-
-    private static Bitmap LoadSprite(string name)
-    {
-        var stream = System.Reflection.Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream($"ClaudeWatch.sprites.{name}")!;
-        return new Bitmap(stream);
+        _style.Apply(Handle, Session.Status, CatSize, Location);
     }
 }
