@@ -22,8 +22,12 @@ internal abstract class IndicatorStyle
         LoadSprite("duck-sleep.png"),
         LoadSprite("duck-working.png"),
         LoadSprite("duck-alert.png"));
+    public static readonly IndicatorStyle Cats    = new SpriteIndicatorStyle("Cats",
+        LoadSprite("cat-sleep.png"),
+        LoadSprite("cat-working.png"),
+        LoadSprite("cat-alert.png"));
 
-    public static IReadOnlyList<IndicatorStyle> All { get; } = [None, Squares, Ducks];
+    public static IReadOnlyList<IndicatorStyle> All { get; } = [None, Squares, Ducks, Cats];
 
     public static IndicatorStyle FromName(string name) =>
         All.FirstOrDefault(s => s.Name == name) ?? Ducks;
