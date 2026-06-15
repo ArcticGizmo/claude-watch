@@ -84,6 +84,6 @@ internal sealed class SessionIndicatorForm : Form
     private new void Refresh()
     {
         if (!IsHandleCreated) return;
-        _style.Apply(Handle, Session.Status, IndicatorSize, Location);
+        _style.Apply(Handle, Session.Status, Session.Mode, IndicatorSize, Location);
     }
 }
