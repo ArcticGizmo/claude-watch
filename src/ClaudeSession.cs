@@ -7,11 +7,21 @@ public enum SessionStatus
     NeedsAttention = 2,
 }
 
+public enum PermissionMode
+{
+    Normal = 0,
+    AcceptEdits = 1,
+    Plan = 2,
+    Auto = 3,
+    Bypass = 4,
+}
+
 public record ClaudeSession(
     string Pid,
     string SessionId,
     SessionStatus Status,
     string Cwd,
     string ProjectName,
-    DateTime LastUpdated
+    DateTime LastUpdated,
+    PermissionMode Mode = PermissionMode.Normal
 );

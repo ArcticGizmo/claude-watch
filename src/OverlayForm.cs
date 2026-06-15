@@ -258,17 +258,46 @@ internal sealed class OverlayForm : Form
             ? attnBrush
             : mutedBrush;
 
+        int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
         var statusSz     = g.MeasureString(statusText, statusFont);
-        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width;
+        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth;
         var nameTrunc    = TruncateString(g, session.ProjectName, nameFont, nameMaxWidth);
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
         g.DrawString(nameTrunc, nameFont, fgBrush,
             HorizPad + 14, midY - nameSz.Height / 2);
 
+        int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
-            ClientSize.Width - HorizPad - statusSz.Width,
-            midY - statusSz.Height / 2);
+            statusX, midY - statusSz.Height / 2);
+
+        if (session.Mode != PermissionMode.Normal)
+            DrawModeBadge(g, session.Mode, statusX - badgeWidth, midY);
+    }
+
+    private static Color ModeColor(PermissionMode mode) => mode switch
+    {
+        PermissionMode.AcceptEdits => Color.FromArgb(167, 139, 250),
+        PermissionMode.Plan        => Color.FromArgb(96,  165, 250),
+        PermissionMode.Auto        => Color.FromArgb(250, 204, 21),
+        PermissionMode.Bypass      => Color.FromArgb(239, 68,  68),
+        _                          => Color.Transparent,
+    };
+
+    private static void DrawModeBadge(Graphics g, PermissionMode mode, int x, int midY)
+    {
+        using var brush = new SolidBrush(ModeColor(mode));
+
+        if (mode == PermissionMode.Plan)
+        {
+            g.FillRectangle(brush, x,     midY - 4, 3, 8);
+            g.FillRectangle(brush, x + 5, midY - 4, 3, 8);
+        }
+        else
+        {
+            g.FillPolygon(brush, new[] { new Point(x,     midY - 4), new Point(x + 5,  midY), new Point(x,     midY + 4) });
+            g.FillPolygon(brush, new[] { new Point(x + 6, midY - 4), new Point(x + 11, midY), new Point(x + 6, midY + 4) });
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

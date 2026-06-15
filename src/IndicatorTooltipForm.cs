@@ -16,9 +16,10 @@ internal sealed class IndicatorTooltipForm : Form
     private static readonly Color AttnColor     = Color.FromArgb(251, 146, 60);
     private static readonly Color IdleColor     = Color.FromArgb(100, 116, 139);
 
-    private string _projectName = "";
-    private string _statusText  = "";
-    private Color  _statusColor = IdleColor;
+    private string         _projectName = "";
+    private string         _statusText  = "";
+    private Color          _statusColor = IdleColor;
+    private PermissionMode _mode        = PermissionMode.Normal;
 
     public IndicatorTooltipForm()
     {
@@ -48,6 +49,7 @@ internal sealed class IndicatorTooltipForm : Form
     public void ShowFor(ClaudeSession session, Point indicatorLocation, int indicatorSize)
     {
         _projectName = session.ProjectName;
+        _mode        = session.Mode;
         (_statusText, _statusColor) = session.Status switch
         {
             SessionStatus.Running        => ("running",          RunningColor),
@@ -57,13 +59,24 @@ internal sealed class IndicatorTooltipForm : Form
 
         using var nameFont   = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
         using var statusFont = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var modeFont   = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
         using var g          = CreateGraphics();
 
         var nameSz   = g.MeasureString(_projectName, nameFont);
         var statusSz = g.MeasureString(_statusText,  statusFont);
 
-        int w = (int)Math.Max(nameSz.Width, statusSz.Width) + HorizPad * 2 + 2;
+        float contentWidth = Math.Max(nameSz.Width, statusSz.Width);
         int h = (int)nameSz.Height + (int)statusSz.Height + VertPad * 2 + 4;
+
+        if (_mode != PermissionMode.Normal)
+        {
+            var modeLabel = ModeLabel(_mode);
+            var modeSz    = g.MeasureString(modeLabel, modeFont);
+            contentWidth  = Math.Max(contentWidth, modeSz.Width + 14); // 14 = badge width + gap
+            h            += (int)modeSz.Height + 2;
+        }
+
+        int w = (int)contentWidth + HorizPad * 2 + 2;
 
         ClientSize = new Size(w, h);
         Location   = new Point(indicatorLocation.X + indicatorSize - w, indicatorLocation.Y - h - 4);
@@ -87,14 +100,60 @@ internal sealed class IndicatorTooltipForm : Form
         using (var pen = new Pen(BorderColor, 1.5f))
             g.DrawPath(pen, path);
 
-        using var nameFont   = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        using var statusFont = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var nameFont    = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        using var statusFont  = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var modeFont    = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
         using var fgBrush     = new SolidBrush(FgColor);
         using var statusBrush = new SolidBrush(_statusColor);
 
-        var nameSz = g.MeasureString(_projectName, nameFont);
+        var nameSz   = g.MeasureString(_projectName, nameFont);
+        var statusSz = g.MeasureString(_statusText,  statusFont);
         g.DrawString(_projectName, nameFont,   fgBrush,     HorizPad, VertPad);
         g.DrawString(_statusText,  statusFont, statusBrush, HorizPad, VertPad + nameSz.Height + 2);
+
+        if (_mode != PermissionMode.Normal)
+        {
+            float modeY   = VertPad + nameSz.Height + 2 + statusSz.Height + 4;
+            var modeColor = ModeColor(_mode);
+            using var modeBrush = new SolidBrush(modeColor);
+            DrawModeBadge(g, _mode, HorizPad, (int)(modeY + modeFont.GetHeight(g) / 2));
+            g.DrawString(ModeLabel(_mode), modeFont, modeBrush, HorizPad + 14, modeY);
+        }
+    }
+
+    private static string ModeLabel(PermissionMode mode) => mode switch
+    {
+        PermissionMode.AcceptEdits => "accept edits",
+        PermissionMode.Plan        => "plan mode",
+        PermissionMode.Auto        => "auto",
+        PermissionMode.Bypass      => "bypass",
+        _                          => "",
+    };
+
+    private static Color ModeColor(PermissionMode mode) => mode switch
+    {
+        PermissionMode.AcceptEdits => Color.FromArgb(167, 139, 250),
+        PermissionMode.Plan        => Color.FromArgb(96,  165, 250),
+        PermissionMode.Auto        => Color.FromArgb(250, 204, 21),
+        PermissionMode.Bypass      => Color.FromArgb(239, 68,  68),
+        _                          => Color.Transparent,
+    };
+
+    private static void DrawModeBadge(Graphics g, PermissionMode mode, int x, int midY)
+    {
+        var color = ModeColor(mode);
+        using var brush = new SolidBrush(color);
+
+        if (mode == PermissionMode.Plan)
+        {
+            g.FillRectangle(brush, x,     midY - 4, 3, 8);
+            g.FillRectangle(brush, x + 5, midY - 4, 3, 8);
+        }
+        else
+        {
+            g.FillPolygon(brush, new[] { new Point(x,     midY - 4), new Point(x + 5,  midY), new Point(x,     midY + 4) });
+            g.FillPolygon(brush, new[] { new Point(x + 6, midY - 4), new Point(x + 11, midY), new Point(x + 6, midY + 4) });
+        }
     }
 
     private static GraphicsPath RoundedRect(Rectangle r, int radius)
