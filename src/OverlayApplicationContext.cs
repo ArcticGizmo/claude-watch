@@ -29,7 +29,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         {
             Visible = true,
             Text    = "Claude Watch",
-            Icon    = IconRenderer.Create(0, SessionStatus.Idle),
+            Icon    = LoadEmbeddedIcon("ClaudeWatch.sprites.icon.png"),
         };
         _notifyIcon.DoubleClick += (_, _) => { _overlay.BringToFront(); _overlay.TopMost = true; };
 
@@ -94,14 +94,6 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         _overlay.UpdateSessions(sessions);
         UpdateIndicators(sessions);
-
-        var worst = sessions.Count == 0
-            ? SessionStatus.Idle
-            : (SessionStatus)sessions.Max(s => (int)s.Status);
-
-        var oldIcon = _notifyIcon.Icon;
-        _notifyIcon.Icon = IconRenderer.Create(sessions.Count, worst);
-        oldIcon?.Dispose();
 
         _notifyIcon.Text = sessions.Count switch
         {
@@ -183,6 +175,25 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _notifyIcon.BalloonTipText  = $"Waiting for you in {session.ProjectName}";
         _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
         _notifyIcon.ShowBalloonTip(8000);
+    }
+
+    private static Icon LoadEmbeddedIcon(string resourceName)
+    {
+        using var stream = typeof(OverlayApplicationContext).Assembly.GetManifestResourceStream(resourceName)!;
+        using var bmp = new Bitmap(stream);
+        var hIcon = bmp.GetHicon();
+        try
+        {
+            using var rawIcon = Icon.FromHandle(hIcon);
+            using var ms = new MemoryStream();
+            rawIcon.Save(ms);
+            ms.Position = 0;
+            return new Icon(ms);
+        }
+        finally
+        {
+            NativeMethods.DestroyIcon(hIcon);
+        }
     }
 
     private void Exit()

@@ -10,6 +10,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="sprites\icon.png" />
     <EmbeddedResource Include="sprites\duck-sleep.png" />
     <EmbeddedResource Include="sprites\duck-working.png" />
     <EmbeddedResource Include="sprites\duck-alert.png" />
