@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <Version>0.1.0</Version>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
@@ -27,5 +28,8 @@
     <EmbeddedResource Include="sprites\wolfenstein-working-plan-mode.png" />
     <EmbeddedResource Include="sprites\wolfenstein-working-auto.png" />
     <EmbeddedResource Include="sprites\wolfenstein-working-bypass.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>
 </Project>
