@@ -1,4 +1,7 @@
 using ClaudeWatch;
+using Velopack;
+
+VelopackApp.Build().Run();
 
 Application.EnableVisualStyles();
 Application.SetCompatibleTextRenderingDefault(false);

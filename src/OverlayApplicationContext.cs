@@ -1,3 +1,6 @@
+using Velopack;
+using Velopack.Sources;
+
 namespace ClaudeWatch;
 
 internal sealed class OverlayApplicationContext : ApplicationContext
@@ -40,8 +43,12 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         showItem.Click += (_, _) => { _overlay.BringToFront(); _overlay.TopMost = true; };
         var exitItem = new ToolStripMenuItem("Exit Claude Watch");
         exitItem.Click += (_, _) => Exit();
+        var updateItem = new ToolStripMenuItem("Check for Updates...");
+        updateItem.Click += (_, _) => CheckForUpdates();
+
         trayMenu.Items.Add(showItem);
         trayMenu.Items.Add(_displayMenu);
+        trayMenu.Items.Add(updateItem);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
         _notifyIcon.ContextMenuStrip = trayMenu;
@@ -193,6 +200,38 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         finally
         {
             NativeMethods.DestroyIcon(hIcon);
+        }
+    }
+
+    private async void CheckForUpdates()
+    {
+        try
+        {
+            var mgr = new UpdateManager(new GithubSource("https://github.com/ArcticGizmo/claude-watch", null, false));
+            var update = await mgr.CheckForUpdatesAsync();
+            if (update == null)
+            {
+                _notifyIcon.BalloonTipTitle = "Claude Watch";
+                _notifyIcon.BalloonTipText  = "You're on the latest version.";
+                _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
+                _notifyIcon.ShowBalloonTip(4000);
+                return;
+            }
+
+            _notifyIcon.BalloonTipTitle = "Claude Watch — Updating";
+            _notifyIcon.BalloonTipText  = $"Downloading v{update.TargetFullRelease.Version}…";
+            _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
+            _notifyIcon.ShowBalloonTip(5000);
+
+            await mgr.DownloadUpdatesAsync(update);
+            mgr.ApplyUpdatesAndRestart(update);
+        }
+        catch (Exception ex)
+        {
+            _notifyIcon.BalloonTipTitle = "Claude Watch — Update Failed";
+            _notifyIcon.BalloonTipText  = ex.Message;
+            _notifyIcon.BalloonTipIcon  = ToolTipIcon.Error;
+            _notifyIcon.ShowBalloonTip(6000);
         }
     }
 
