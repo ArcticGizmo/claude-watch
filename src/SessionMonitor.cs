@@ -9,7 +9,9 @@ internal sealed class SessionMonitor : IDisposable
 
     private readonly string _sessionsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude", "sessions");
+        ".claude",
+        "sessions"
+    );
 
     private readonly Dictionary<string, string> _lastRawStatus = new();
     private readonly Dictionary<string, DateTime> _idleSince = new();
@@ -26,8 +28,14 @@ internal sealed class SessionMonitor : IDisposable
         var now = DateTime.Now;
 
         string[] files;
-        try { files = Directory.GetFiles(_sessionsDir, "*.json"); }
-        catch { return []; }
+        try
+        {
+            files = Directory.GetFiles(_sessionsDir, "*.json");
+        }
+        catch
+        {
+            return [];
+        }
 
         foreach (var file in files)
         {
@@ -52,22 +60,33 @@ internal sealed class SessionMonitor : IDisposable
         try
         {
             string json;
-            using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (
+                var fs = new FileStream(
+                    filePath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite
+                )
+            )
             using (var reader = new StreamReader(fs))
                 json = reader.ReadToEnd();
 
             var node = JsonNode.Parse(json);
-            if (node == null) return null;
+            if (node == null)
+                return null;
 
-            var pid = node["pid"]?.GetValue<long>().ToString() ?? Path.GetFileNameWithoutExtension(filePath);
+            var pid =
+                node["pid"]?.GetValue<long>().ToString()
+                ?? Path.GetFileNameWithoutExtension(filePath);
             var sessionId = node["sessionId"]?.GetValue<string>() ?? "";
             var rawStatus = node["status"]?.GetValue<string>() ?? "idle";
             var cwd = node["cwd"]?.GetValue<string>() ?? "";
             var updatedAtMs = node["updatedAt"]?.GetValue<long>() ?? 0;
 
-            var updatedAt = updatedAtMs > 0
-                ? DateTimeOffset.FromUnixTimeMilliseconds(updatedAtMs).LocalDateTime
-                : now;
+            var updatedAt =
+                updatedAtMs > 0
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(updatedAtMs).LocalDateTime
+                    : now;
 
             if (!IsProcessRunning(pid))
                 return null;
@@ -83,8 +102,10 @@ internal sealed class SessionMonitor : IDisposable
                 status = SessionStatus.Running;
                 _idleSince.Remove(pid);
             }
-            else if (_idleSince.TryGetValue(pid, out var idleAt) &&
-                     (now - idleAt).TotalMinutes < NeedsAttentionMinutes)
+            else if (
+                _idleSince.TryGetValue(pid, out var idleAt)
+                && (now - idleAt).TotalMinutes < NeedsAttentionMinutes
+            )
             {
                 status = SessionStatus.NeedsAttention;
             }
@@ -95,9 +116,21 @@ internal sealed class SessionMonitor : IDisposable
 
             var projectName = string.IsNullOrEmpty(cwd)
                 ? sessionId[..Math.Min(8, sessionId.Length)]
-                : Path.GetFileName(cwd.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                : Path.GetFileName(
+                    cwd.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                );
 
-            var session = new ClaudeSession(pid, sessionId, status, cwd, projectName, updatedAt);
+            var mode = ReadPermissionMode(Path.Combine(_sessionsDir, $"{sessionId}.mode"));
+
+            var session = new ClaudeSession(
+                pid,
+                sessionId,
+                status,
+                cwd,
+                projectName,
+                updatedAt,
+                mode
+            );
 
             if (status == SessionStatus.NeedsAttention && prevRaw == "busy")
                 NeedsAttention?.Invoke(session);
@@ -110,11 +143,46 @@ internal sealed class SessionMonitor : IDisposable
         }
     }
 
+    private static PermissionMode ReadPermissionMode(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return PermissionMode.Normal;
+            }
+            var text = File.ReadAllText(path).Trim().ToLowerInvariant();
+            return text switch
+            {
+                "acceptedits" or "accept_edits" or "accept-edits" => PermissionMode.AcceptEdits,
+                "plan" => PermissionMode.Plan,
+                "auto" => PermissionMode.Auto,
+                "bypass"
+                or "bypassall"
+                or "bypass_all"
+                or "bypasspermissions"
+                or "bypass_permissions" => PermissionMode.Bypass,
+                _ => PermissionMode.Normal,
+            };
+        }
+        catch
+        {
+            return PermissionMode.Normal;
+        }
+    }
+
     private static bool IsProcessRunning(string pid)
     {
-        if (!int.TryParse(pid, out var id)) return false;
-        try { return !Process.GetProcessById(id).HasExited; }
-        catch { return false; }
+        if (!int.TryParse(pid, out var id))
+            return false;
+        try
+        {
+            return !Process.GetProcessById(id).HasExited;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public void Acknowledge(string pid) => _idleSince.Remove(pid);

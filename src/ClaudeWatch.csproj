@@ -20,5 +20,12 @@
     <EmbeddedResource Include="sprites\square-sleep.png" />
     <EmbeddedResource Include="sprites\square-working.png" />
     <EmbeddedResource Include="sprites\square-alert.png" />
+    <EmbeddedResource Include="sprites\wolfenstein-sleep.png" />
+    <EmbeddedResource Include="sprites\wolfenstein-working.png" />
+    <EmbeddedResource Include="sprites\wolfenstein-alert.png" />
+    <EmbeddedResource Include="sprites\wolfenstein-working-accept-edits.png" />
+    <EmbeddedResource Include="sprites\wolfenstein-working-plan-mode.png" />
+    <EmbeddedResource Include="sprites\wolfenstein-working-auto.png" />
+    <EmbeddedResource Include="sprites\wolfenstein-working-bypass.png" />
   </ItemGroup>
 </Project>

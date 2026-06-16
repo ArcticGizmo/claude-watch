@@ -12,7 +12,7 @@ internal abstract class IndicatorStyle
     public virtual bool ShowForms => true;
 
     /// <summary>Paint the session indicator onto the layered window handle.</summary>
-    public abstract void Apply(IntPtr hwnd, SessionStatus status, int size, Point location);
+    public abstract void Apply(IntPtr hwnd, SessionStatus status, PermissionMode mode, int size, Point location);
 
     // ── Built-in styles ──────────────────────────────────────────────────────
 
@@ -29,8 +29,19 @@ internal abstract class IndicatorStyle
         LoadSprite("cat-sleep.png"),
         LoadSprite("cat-working.png"),
         LoadSprite("cat-alert.png"));
+    public static readonly IndicatorStyle Wolfenstein = new SpriteIndicatorStyle("Wolfenstein",
+        LoadSprite("wolfenstein-sleep.png"),
+        LoadSprite("wolfenstein-working.png"),
+        LoadSprite("wolfenstein-alert.png"),
+        new Dictionary<PermissionMode, Bitmap>
+        {
+            [PermissionMode.AcceptEdits] = LoadSprite("wolfenstein-working-accept-edits.png"),
+            [PermissionMode.Plan]        = LoadSprite("wolfenstein-working-plan-mode.png"),
+            [PermissionMode.Auto]        = LoadSprite("wolfenstein-working-auto.png"),
+            [PermissionMode.Bypass]      = LoadSprite("wolfenstein-working-bypass.png"),
+        });
 
-    public static IReadOnlyList<IndicatorStyle> All { get; } = [None, Squares, Ducks, Cats];
+    public static IReadOnlyList<IndicatorStyle> All { get; } = [None, Squares, Ducks, Cats, Wolfenstein];
 
     public static IndicatorStyle FromName(string name) =>
         All.FirstOrDefault(s => s.Name == name) ?? Ducks;
@@ -49,7 +60,7 @@ internal sealed class NoneIndicatorStyle : IndicatorStyle
 {
     public override string Name    => "None";
     public override bool ShowForms => false;
-    public override void Apply(IntPtr hwnd, SessionStatus status, int size, Point location) { }
+    public override void Apply(IntPtr hwnd, SessionStatus status, PermissionMode mode, int size, Point location) { }
 }
 
 /// <summary>
@@ -60,23 +71,26 @@ internal sealed class NoneIndicatorStyle : IndicatorStyle
 internal sealed class SpriteIndicatorStyle : IndicatorStyle
 {
     private readonly Bitmap _idle, _active, _attention;
+    private readonly IReadOnlyDictionary<PermissionMode, Bitmap> _activeByMode;
 
-    public SpriteIndicatorStyle(string name, Bitmap idle, Bitmap active, Bitmap attention)
+    public SpriteIndicatorStyle(string name, Bitmap idle, Bitmap active, Bitmap attention,
+        IReadOnlyDictionary<PermissionMode, Bitmap>? activeByMode = null)
     {
-        Name       = name;
-        _idle      = idle;
-        _active    = active;
-        _attention = attention;
+        Name          = name;
+        _idle         = idle;
+        _active       = active;
+        _attention    = attention;
+        _activeByMode = activeByMode ?? new Dictionary<PermissionMode, Bitmap>();
     }
 
     public override string Name { get; }
 
-    public override void Apply(IntPtr hwnd, SessionStatus status, int size, Point location) =>
-        NativeMethods.ApplyLayeredBitmap(hwnd, StatusSprite(status), size, location);
+    public override void Apply(IntPtr hwnd, SessionStatus status, PermissionMode mode, int size, Point location) =>
+        NativeMethods.ApplyLayeredBitmap(hwnd, StatusSprite(status, mode), size, location);
 
-    private Bitmap StatusSprite(SessionStatus s) => s switch
+    private Bitmap StatusSprite(SessionStatus s, PermissionMode mode) => s switch
     {
-        SessionStatus.Running        => _active,
+        SessionStatus.Running        => _activeByMode.TryGetValue(mode, out var m) ? m : _active,
         SessionStatus.NeedsAttention => _attention,
         _                            => _idle,
     };
