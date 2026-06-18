@@ -382,6 +382,7 @@ internal sealed class OverlayForm : Form
         }
 
         _dragging = false;
+        _wasDrag  = false;
         base.OnMouseUp(e);
     }
 
