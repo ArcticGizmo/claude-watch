@@ -56,6 +56,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _monitor = new SessionMonitor();
         _monitor.SessionsChanged += OnSessionsChanged;
         _monitor.NeedsAttention  += OnNeedsAttention;
+        _monitor.AwaitingInput   += OnAwaitingInput;
 
         _pollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
         _pollTimer.Tick += (_, _) => _monitor.Scan();
@@ -181,6 +182,16 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _notifyIcon.BalloonTipTitle = "Claude Code — Done";
         _notifyIcon.BalloonTipText  = $"Waiting for you in {session.ProjectName}";
         _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
+        _notifyIcon.ShowBalloonTip(8000);
+    }
+
+    private void OnAwaitingInput(ClaudeSession session)
+    {
+        _overlay.TriggerAttention();
+
+        _notifyIcon.BalloonTipTitle = "Claude Code — Waiting for Input";
+        _notifyIcon.BalloonTipText  = $"{session.ProjectName} needs your response";
+        _notifyIcon.BalloonTipIcon  = ToolTipIcon.Warning;
         _notifyIcon.ShowBalloonTip(8000);
     }
 

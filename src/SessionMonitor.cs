@@ -15,9 +15,11 @@ internal sealed class SessionMonitor : IDisposable
 
     private readonly Dictionary<string, string> _lastRawStatus = new();
     private readonly Dictionary<string, DateTime> _idleSince = new();
+    private readonly HashSet<string> _awaitingInputPids = new();
 
     public event Action<IReadOnlyList<ClaudeSession>>? SessionsChanged;
     public event Action<ClaudeSession>? NeedsAttention;
+    public event Action<ClaudeSession>? AwaitingInput;
 
     public IReadOnlyList<ClaudeSession> Scan()
     {
@@ -49,6 +51,7 @@ internal sealed class SessionMonitor : IDisposable
         {
             _lastRawStatus.Remove(key);
             _idleSince.Remove(key);
+            _awaitingInputPids.Remove(key);
         }
 
         SessionsChanged?.Invoke(sessions);
@@ -80,6 +83,7 @@ internal sealed class SessionMonitor : IDisposable
                 ?? Path.GetFileNameWithoutExtension(filePath);
             var sessionId = node["sessionId"]?.GetValue<string>() ?? "";
             var rawStatus = node["status"]?.GetValue<string>() ?? "idle";
+            var waitingFor = node["waitingFor"]?.GetValue<string>();
             var cwd = node["cwd"]?.GetValue<string>() ?? "";
             var updatedAtMs = node["updatedAt"]?.GetValue<long>() ?? 0;
 
@@ -99,19 +103,25 @@ internal sealed class SessionMonitor : IDisposable
             SessionStatus status;
             if (rawStatus == "busy")
             {
-                status = SessionStatus.Running;
                 _idleSince.Remove(pid);
-            }
-            else if (
-                _idleSince.TryGetValue(pid, out var idleAt)
-                && (now - idleAt).TotalMinutes < NeedsAttentionMinutes
-            )
-            {
-                status = SessionStatus.NeedsAttention;
+                if (!string.IsNullOrWhiteSpace(waitingFor))
+                    status = SessionStatus.AwaitingInput;
+                else
+                {
+                    status = SessionStatus.Running;
+                    _awaitingInputPids.Remove(pid);
+                }
             }
             else
             {
-                status = SessionStatus.Idle;
+                _awaitingInputPids.Remove(pid);
+                if (
+                    _idleSince.TryGetValue(pid, out var idleAt)
+                    && (now - idleAt).TotalMinutes < NeedsAttentionMinutes
+                )
+                    status = SessionStatus.NeedsAttention;
+                else
+                    status = SessionStatus.Idle;
             }
 
             var projectName = string.IsNullOrEmpty(cwd)
@@ -134,6 +144,9 @@ internal sealed class SessionMonitor : IDisposable
 
             if (status == SessionStatus.NeedsAttention && prevRaw == "busy")
                 NeedsAttention?.Invoke(session);
+
+            if (status == SessionStatus.AwaitingInput && _awaitingInputPids.Add(pid))
+                AwaitingInput?.Invoke(session);
 
             return session;
         }

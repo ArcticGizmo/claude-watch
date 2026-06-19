@@ -5,6 +5,7 @@ public enum SessionStatus
     Idle = 0,
     Running = 1,
     NeedsAttention = 2,
+    AwaitingInput = 3,
 }
 
 public enum PermissionMode
