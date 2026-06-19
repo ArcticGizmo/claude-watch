@@ -7,9 +7,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 {
     private const int IndicatorGap = 6;
 
+    // FileSystemWatcher can silently drop events on buffer overflow, so a slow
+    // reconciliation scan keeps state honest even if a change notification is missed.
+    private const int ReconcileIntervalMs = 30_000;
+
     private readonly OverlayForm _overlay;
     private readonly SessionMonitor _monitor;
-    private readonly System.Windows.Forms.Timer _pollTimer;
+    private readonly System.Windows.Forms.Timer _reconcileTimer;
+    private readonly System.Windows.Forms.Timer _deadlineTimer;
     private readonly NotifyIcon _notifyIcon;
     private readonly Dictionary<string, SessionIndicatorForm> _indicators = new();
     private readonly AppSettings _settings;
@@ -57,13 +62,21 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _monitor.SessionsChanged += OnSessionsChanged;
         _monitor.NeedsAttention  += OnNeedsAttention;
         _monitor.AwaitingInput   += OnAwaitingInput;
+        // Fires on a thread-pool thread (watcher / process-exit callbacks); marshal to the UI thread.
+        _monitor.ChangeDetected  += RequestScan;
 
-        _pollTimer = new System.Windows.Forms.Timer { Interval = 3000 };
-        _pollTimer.Tick += (_, _) => _monitor.Scan();
-        _pollTimer.Start();
+        // One-shot timer that fires the moment a "needs attention" window lapses back to idle —
+        // a purely time-based transition with no corresponding file change to drive it.
+        _deadlineTimer = new System.Windows.Forms.Timer();
+        _deadlineTimer.Tick += (_, _) => { _deadlineTimer.Stop(); _monitor.Scan(); };
 
-        _monitor.Scan();
+        // Low-frequency safety net against dropped FileSystemWatcher events.
+        _reconcileTimer = new System.Windows.Forms.Timer { Interval = ReconcileIntervalMs };
+        _reconcileTimer.Tick += (_, _) => _monitor.Scan();
+        _reconcileTimer.Start();
+
         _overlay.Show();
+        _monitor.Scan();
     }
 
     private ToolStripMenuItem BuildDisplayMenu()
@@ -102,6 +115,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         _overlay.UpdateSessions(sessions);
         UpdateIndicators(sessions);
+        ArmDeadlineTimer();
 
         _notifyIcon.Text = sessions.Count switch
         {
@@ -109,6 +123,35 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             1 => "Claude Watch — 1 session",
             _ => $"Claude Watch — {sessions.Count} sessions",
         };
+    }
+
+    // Marshals a re-scan onto the UI thread. SessionMonitor raises ChangeDetected from
+    // FileSystemWatcher and Process.Exited callbacks, which run on thread-pool threads.
+    private void RequestScan()
+    {
+        try
+        {
+            if (_overlay.IsHandleCreated && !_overlay.IsDisposed)
+                _overlay.BeginInvoke((Action)(() => _monitor.Scan()));
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    // Arms the one-shot timer for the next needs-attention deadline reported by the monitor.
+    // Called from OnSessionsChanged (i.e. after every Scan), so it always reflects current state.
+    private void ArmDeadlineTimer()
+    {
+        _deadlineTimer.Stop();
+
+        var deadline = _monitor.NextNeedsAttentionDeadline;
+        if (deadline == null)
+            return;
+
+        var ms = (deadline.Value - DateTime.Now).TotalMilliseconds;
+        // Fire on the next message-loop tick if already due (never re-scan re-entrantly here).
+        _deadlineTimer.Interval = (int)Math.Clamp(ms, 1, int.MaxValue);
+        _deadlineTimer.Start();
     }
 
     private void UpdateIndicators(IReadOnlyList<ClaudeSession> sessions)
@@ -248,7 +291,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private void Exit()
     {
-        _pollTimer.Stop();
+        _reconcileTimer.Stop();
+        _deadlineTimer.Stop();
         _notifyIcon.Visible = false;
         foreach (var indicator in _indicators.Values) indicator.Close();
         _overlay.Close();
@@ -258,7 +302,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         if (disposing)
         {
-            _pollTimer.Dispose();
+            _reconcileTimer.Dispose();
+            _deadlineTimer.Dispose();
             _monitor.Dispose();
             _notifyIcon.Icon?.Dispose();
             _notifyIcon.Dispose();
