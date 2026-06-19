@@ -23,6 +23,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private IReadOnlyList<ClaudeSession> _currentSessions = [];
     private IndicatorStyle _currentStyle;
 
+    // PID of the session whose notification was last shown, so a balloon click
+    // can focus the right terminal.
+    private string? _lastNotifiedPid;
+
     public OverlayApplicationContext()
     {
         _settings     = AppSettings.Load();
@@ -40,6 +44,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             Icon    = LoadEmbeddedIcon("ClaudeWatch.sprites.icon.png"),
         };
         _notifyIcon.DoubleClick += (_, _) => { _overlay.BringToFront(); _overlay.TopMost = true; };
+        _notifyIcon.BalloonTipClicked += OnBalloonTipClicked;
 
         _displayMenu = BuildDisplayMenu();
 
@@ -222,6 +227,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         _overlay.TriggerAttention();
 
+        _lastNotifiedPid = session.Pid;
         _notifyIcon.BalloonTipTitle = "Claude Code — Done";
         _notifyIcon.BalloonTipText  = $"Waiting for you in {session.ProjectName}";
         _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
@@ -232,10 +238,24 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         _overlay.TriggerAttention();
 
+        _lastNotifiedPid = session.Pid;
         _notifyIcon.BalloonTipTitle = "Claude Code — Waiting for Input";
         _notifyIcon.BalloonTipText  = $"{session.ProjectName} needs your response";
         _notifyIcon.BalloonTipIcon  = ToolTipIcon.Warning;
         _notifyIcon.ShowBalloonTip(8000);
+    }
+
+    // Clicking the desktop notification focuses the terminal for the session that
+    // raised it and acknowledges the alert, mirroring an overlay/indicator click.
+    private void OnBalloonTipClicked(object? sender, EventArgs e)
+    {
+        var pid = _lastNotifiedPid;
+        if (pid == null) return;
+
+        if (int.TryParse(pid, out int pidInt))
+            NativeMethods.FocusTerminalForProcess(pidInt);
+
+        AcknowledgeSession(pid);
     }
 
     private static Icon LoadEmbeddedIcon(string resourceName)
@@ -259,6 +279,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private async void CheckForUpdates()
     {
+        // Update balloons aren't tied to a session; don't let a click focus a stale terminal.
+        _lastNotifiedPid = null;
         try
         {
             var mgr = new UpdateManager(new GithubSource("https://github.com/ArcticGizmo/claude-watch", null, false));

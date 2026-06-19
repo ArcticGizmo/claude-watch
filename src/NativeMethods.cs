@@ -128,6 +128,16 @@ internal static class NativeMethods
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
@@ -201,9 +211,29 @@ internal static class NativeMethods
         }, IntPtr.Zero);
 
         if (best != IntPtr.Zero)
+            ForceForeground(best);
+    }
+
+    // SetForegroundWindow is silently ignored when the calling process doesn't own the
+    // foreground (Windows' foreground lock). Briefly attaching our input queue to the
+    // current foreground thread lifts that restriction so the activation actually sticks —
+    // the standard workaround used when focusing from a tray/notification click.
+    private static void ForceForeground(IntPtr hWnd)
+    {
+        ShowWindow(hWnd, SW_RESTORE);
+
+        uint foreThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+        uint thisThread = GetCurrentThreadId();
+
+        if (foreThread != 0 && foreThread != thisThread)
         {
-            ShowWindow(best, SW_RESTORE);
-            SetForegroundWindow(best);
+            AttachThreadInput(foreThread, thisThread, true);
+            SetForegroundWindow(hWnd);
+            AttachThreadInput(foreThread, thisThread, false);
+        }
+        else
+        {
+            SetForegroundWindow(hWnd);
         }
     }
 
