@@ -92,6 +92,7 @@ internal sealed class SpriteIndicatorStyle : IndicatorStyle
     {
         SessionStatus.Running        => _activeByMode.TryGetValue(mode, out var m) ? m : _active,
         SessionStatus.NeedsAttention => _attention,
+        SessionStatus.AwaitingInput  => _attention,
         _                            => _idle,
     };
 }

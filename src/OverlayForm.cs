@@ -22,9 +22,10 @@ internal sealed class OverlayForm : Form
     private static readonly Color BgColor        = Color.FromArgb(15,  15,  20);
     private static readonly Color BorderNormal   = Color.FromArgb(45,  45,  60);
     private static readonly Color BorderAttention= Color.FromArgb(251, 146, 60);
-    private static readonly Color RunningColor   = Color.FromArgb(34,  197, 94);
-    private static readonly Color AttentionColor = Color.FromArgb(251, 146, 60);
-    private static readonly Color IdleColor      = Color.FromArgb(100, 116, 139);
+    private static readonly Color RunningColor      = Color.FromArgb(34,  197, 94);
+    private static readonly Color AttentionColor   = Color.FromArgb(251, 146, 60);
+    private static readonly Color AwaitingColor    = Color.FromArgb(250, 204, 21);
+    private static readonly Color IdleColor        = Color.FromArgb(100, 116, 139);
     private static readonly Color FgColor        = Color.FromArgb(225, 225, 235);
     private static readonly Color MutedColor     = Color.FromArgb(110, 110, 130);
     private static readonly Color SepColor       = Color.FromArgb(35,  35,  50);
@@ -90,7 +91,7 @@ internal sealed class OverlayForm : Form
             _expanded = false;
 
         // Stop flashing if nothing needs attention anymore
-        if (_attentionFlash && _sessions.All(s => s.Status != SessionStatus.NeedsAttention))
+        if (_attentionFlash && _sessions.All(s => s.Status != SessionStatus.NeedsAttention && s.Status != SessionStatus.AwaitingInput))
         {
             _flashTimer.Stop();
             _flashStopTimer.Stop();
@@ -179,12 +180,14 @@ internal sealed class OverlayForm : Form
         {
             int running   = _sessions.Count(s => s.Status == SessionStatus.Running);
             int attention = _sessions.Count(s => s.Status == SessionStatus.NeedsAttention);
+            int awaiting  = _sessions.Count(s => s.Status == SessionStatus.AwaitingInput);
             int idle      = _sessions.Count(s => s.Status == SessionStatus.Idle);
 
-            x = DrawStatusPill(g, x, midY, running,   RunningColor,   FgColor,       countFont);
+            x = DrawStatusPill(g, x, midY, awaiting,  AwaitingColor,  AwaitingColor,  countFont);
+            x = DrawStatusPill(g, x, midY, running,   RunningColor,   FgColor,        countFont);
             x = DrawStatusPill(g, x, midY, attention, AttentionColor, AttentionColor, countFont);
 
-            if (running == 0 && attention == 0)
+            if (running == 0 && attention == 0 && awaiting == 0)
                 DrawStatusPill(g, x, midY, idle, IdleColor, IdleColor, countFont);
         }
 
@@ -235,6 +238,7 @@ internal sealed class OverlayForm : Form
         {
             SessionStatus.Running        => RunningColor,
             SessionStatus.NeedsAttention => AttentionColor,
+            SessionStatus.AwaitingInput  => AwaitingColor,
             _                            => IdleColor,
         };
 
@@ -243,20 +247,25 @@ internal sealed class OverlayForm : Form
 
         using var nameFont   = new Font("Segoe UI", 8.5f, GraphicsUnit.Point);
         using var statusFont = new Font("Segoe UI", 7.5f, GraphicsUnit.Point);
-        using var fgBrush    = new SolidBrush(FgColor);
-        using var mutedBrush = new SolidBrush(MutedColor);
-        using var attnBrush  = new SolidBrush(AttentionColor);
+        using var fgBrush      = new SolidBrush(FgColor);
+        using var mutedBrush   = new SolidBrush(MutedColor);
+        using var attnBrush    = new SolidBrush(AttentionColor);
+        using var awaitBrush   = new SolidBrush(AwaitingColor);
 
-        var statusText  = session.Status switch
+        var statusText = session.Status switch
         {
             SessionStatus.Running        => "running",
             SessionStatus.NeedsAttention => "done ↩",
+            SessionStatus.AwaitingInput  => "input ↩",
             _                            => "idle",
         };
 
-        Brush statusBrush = session.Status == SessionStatus.NeedsAttention
-            ? attnBrush
-            : mutedBrush;
+        Brush statusBrush = session.Status switch
+        {
+            SessionStatus.NeedsAttention => attnBrush,
+            SessionStatus.AwaitingInput  => awaitBrush,
+            _                            => mutedBrush,
+        };
 
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
         var statusSz     = g.MeasureString(statusText, statusFont);

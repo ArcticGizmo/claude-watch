@@ -12,9 +12,10 @@ internal sealed class IndicatorTooltipForm : Form
     private static readonly Color BgColor       = Color.FromArgb(20,  20,  28);
     private static readonly Color BorderColor   = Color.FromArgb(60,  60,  80);
     private static readonly Color FgColor       = Color.FromArgb(225, 225, 235);
-    private static readonly Color RunningColor  = Color.FromArgb(34,  197, 94);
-    private static readonly Color AttnColor     = Color.FromArgb(251, 146, 60);
-    private static readonly Color IdleColor     = Color.FromArgb(100, 116, 139);
+    private static readonly Color RunningColor   = Color.FromArgb(34,  197, 94);
+    private static readonly Color AttnColor      = Color.FromArgb(251, 146, 60);
+    private static readonly Color AwaitingColor  = Color.FromArgb(250, 204, 21);
+    private static readonly Color IdleColor      = Color.FromArgb(100, 116, 139);
 
     private string         _projectName = "";
     private string         _statusText  = "";
@@ -54,6 +55,7 @@ internal sealed class IndicatorTooltipForm : Form
         {
             SessionStatus.Running        => ("running",          RunningColor),
             SessionStatus.NeedsAttention => ("needs attention",  AttnColor),
+            SessionStatus.AwaitingInput  => ("awaiting input",   AwaitingColor),
             _                            => ("idle",             IdleColor),
         };
 
