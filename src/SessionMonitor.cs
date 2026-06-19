@@ -157,16 +157,21 @@ internal sealed class SessionMonitor : IDisposable
             _lastRawStatus[pid] = rawStatus;
 
             SessionStatus status;
-            if (rawStatus == "busy")
+            // Claude Code reports a dedicated "waiting" status (with a "waitingFor" hint such as
+            // "permission prompt") while it is blocked on user input. Some flows may also surface
+            // a non-empty waitingFor without flipping the status, so treat either as awaiting input.
+            bool awaitingInput =
+                rawStatus == "waiting" || !string.IsNullOrWhiteSpace(waitingFor);
+            if (awaitingInput)
             {
                 _idleSince.Remove(pid);
-                if (!string.IsNullOrWhiteSpace(waitingFor))
-                    status = SessionStatus.AwaitingInput;
-                else
-                {
-                    status = SessionStatus.Running;
-                    _awaitingInputPids.Remove(pid);
-                }
+                status = SessionStatus.AwaitingInput;
+            }
+            else if (rawStatus == "busy")
+            {
+                _idleSince.Remove(pid);
+                status = SessionStatus.Running;
+                _awaitingInputPids.Remove(pid);
             }
             else
             {
