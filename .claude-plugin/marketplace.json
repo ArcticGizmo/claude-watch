@@ -1,0 +1,12 @@
+{
+  "name": "claude-watch",
+  "description": "Plugins that feed live session state to the claude-watch tray app.",
+  "owner": { "name": "Jonathan Howell", "email": "" },
+  "plugins": [
+    {
+      "name": "permission-monitor",
+      "source": "./plugins/permission-monitor",
+      "description": "Writes each session's live permission mode to ~/.claude/sessions/{id}.mode for claude-watch."
+    }
+  ]
+}

@@ -19,6 +19,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private readonly Dictionary<string, SessionIndicatorForm> _indicators = new();
     private readonly AppSettings _settings;
     private readonly ToolStripMenuItem _displayMenu;
+    private readonly PluginManager _pluginManager = new();
+    private ToolStripMenuItem _permissionStatusItem = null!;
 
     private IReadOnlyList<ClaudeSession> _currentSessions = [];
     private IndicatorStyle _currentStyle;
@@ -58,6 +60,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         trayMenu.Items.Add(showItem);
         trayMenu.Items.Add(_displayMenu);
+        trayMenu.Items.Add(BuildPermissionMenu());
         trayMenu.Items.Add(updateItem);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
@@ -99,6 +102,61 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             menu.DropDownItems.Add(item);
         }
         return menu;
+    }
+
+    // Submenu that lets the user install/remove the permission-monitor plugin, which feeds
+    // live {session_id}.mode files to SessionMonitor. Health is refreshed each time it opens.
+    private ToolStripMenuItem BuildPermissionMenu()
+    {
+        var menu = new ToolStripMenuItem("Permission detection");
+
+        _permissionStatusItem = new ToolStripMenuItem("Status: checking…") { Enabled = false };
+
+        var installItem = new ToolStripMenuItem("Install / enable detection");
+        installItem.Click += async (_, _) => await RunPluginAction(_pluginManager.InstallAsync, "Permission detection");
+
+        var uninstallItem = new ToolStripMenuItem("Uninstall detection");
+        uninstallItem.Click += async (_, _) => await RunPluginAction(_pluginManager.UninstallAsync, "Permission detection");
+
+        var copyItem = new ToolStripMenuItem("Copy install commands");
+        copyItem.Click += (_, _) =>
+        {
+            try { Clipboard.SetText(PluginManager.FallbackCommands); } catch { }
+            ShowBalloon("Claude Watch", "Install commands copied — paste them into a Claude Code session.", ToolTipIcon.Info);
+        };
+
+        menu.DropDownItems.Add(_permissionStatusItem);
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(installItem);
+        menu.DropDownItems.Add(uninstallItem);
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(copyItem);
+
+        menu.DropDownOpening += async (_, _) => await RefreshPermissionStatus();
+        return menu;
+    }
+
+    private async Task RefreshPermissionStatus()
+    {
+        var health = await _pluginManager.GetHealthAsync();
+        _permissionStatusItem.Text = "Status: " + PluginManager.Describe(health);
+    }
+
+    private async Task RunPluginAction(Func<Task<(bool ok, string message)>> action, string title)
+    {
+        _lastNotifiedPid = null; // not session-tied; don't let a balloon click focus a stale terminal
+        _permissionStatusItem.Text = "Status: working…";
+        var (ok, message) = await action();
+        ShowBalloon($"Claude Watch — {title}", message, ok ? ToolTipIcon.Info : ToolTipIcon.Error);
+        await RefreshPermissionStatus();
+    }
+
+    private void ShowBalloon(string title, string text, ToolTipIcon icon)
+    {
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText  = text;
+        _notifyIcon.BalloonTipIcon  = icon;
+        _notifyIcon.ShowBalloonTip(6000);
     }
 
     private void OnDisplayStyleSelected(object? sender, EventArgs e)
