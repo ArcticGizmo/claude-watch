@@ -46,7 +46,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         {
             Visible = true,
             Text    = "Claude Watch",
-            Icon    = LoadEmbeddedIcon("ClaudeWatch.icon.png"),
+            Icon    = LoadTrayIcon(),
         };
         // Left-click opens the first-class settings window; right-click shows the slim menu below.
         _notifyIcon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenSettings(); };
@@ -249,23 +249,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         AcknowledgeSession(pid);
     }
 
-    private static Icon LoadEmbeddedIcon(string resourceName)
+    // Loads the multi-resolution app icon and picks the frame that best fits the tray at the
+    // current DPI (the .ico ships a true 16px image), so the orange logo stays crisp and colour-
+    // accurate instead of being downscaled from the 32px PNG.
+    private static Icon LoadTrayIcon()
     {
-        using var stream = typeof(OverlayApplicationContext).Assembly.GetManifestResourceStream(resourceName)!;
-        using var bmp = new Bitmap(stream);
-        var hIcon = bmp.GetHicon();
-        try
-        {
-            using var rawIcon = Icon.FromHandle(hIcon);
-            using var ms = new MemoryStream();
-            rawIcon.Save(ms);
-            ms.Position = 0;
-            return new Icon(ms);
-        }
-        finally
-        {
-            NativeMethods.DestroyIcon(hIcon);
-        }
+        using var stream = typeof(OverlayApplicationContext).Assembly.GetManifestResourceStream("ClaudeWatch.icon.ico")!;
+        return new Icon(stream, SystemInformation.SmallIconSize);
     }
 
     private async void CheckForUpdates()
