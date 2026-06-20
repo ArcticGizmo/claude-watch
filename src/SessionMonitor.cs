@@ -16,6 +16,8 @@ internal sealed class SessionMonitor : IDisposable
 
     private readonly Dictionary<string, string> _lastRawStatus = new();
     private readonly Dictionary<string, DateTime> _idleSince = new();
+    // When each PID last entered a continuous Running stretch, so we can show elapsed run time.
+    private readonly Dictionary<string, DateTime> _runningSince = new();
     private readonly HashSet<string> _awaitingInputPids = new();
     // PIDs that had at least one running sub-agent on the previous scan, so we can detect the
     // moment they all finish and treat it like a busy->idle completion.
@@ -93,6 +95,7 @@ internal sealed class SessionMonitor : IDisposable
         {
             _lastRawStatus.Remove(key);
             _idleSince.Remove(key);
+            _runningSince.Remove(key);
             _awaitingInputPids.Remove(key);
             _hadRunningSubs.Remove(key);
         }
@@ -230,6 +233,24 @@ internal sealed class SessionMonitor : IDisposable
 
             var mode = ReadPermissionMode(Path.Combine(_sessionsDir, $"{sessionId}.mode"));
 
+            // Track the start of the current continuous Running stretch so the overlay can show
+            // elapsed run time; reset the moment the session stops running.
+            DateTime? runningSince;
+            if (status == SessionStatus.Running)
+            {
+                if (!_runningSince.TryGetValue(pid, out var since))
+                {
+                    since = now;
+                    _runningSince[pid] = since;
+                }
+                runningSince = since;
+            }
+            else
+            {
+                _runningSince.Remove(pid);
+                runningSince = null;
+            }
+
             // Live activity: only worth reading the transcript tail while the session is working.
             var activity = status == SessionStatus.Running
                 ? _transcripts.GetActivity(sessionId, cwd)
@@ -244,7 +265,8 @@ internal sealed class SessionMonitor : IDisposable
                 updatedAt,
                 mode,
                 subAgents,
-                activity
+                activity,
+                runningSince
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))

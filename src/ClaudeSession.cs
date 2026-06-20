@@ -37,9 +37,30 @@ public record ClaudeSession(
     DateTime LastUpdated,
     PermissionMode Mode = PermissionMode.Normal,
     IReadOnlyList<SubAgent>? SubAgents = null,
-    string? Activity = null
+    string? Activity = null,
+    DateTime? RunningSince = null
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
     public IReadOnlyList<SubAgent> SubAgents { get; init; } = SubAgents ?? [];
+
+    /// <summary>
+    /// How long this session has been continuously running, as a compact label showing only the
+    /// most significant unit ("8s", "3m", "2h"). Null when the session isn't running.
+    /// </summary>
+    public string? RunningElapsedLabel()
+    {
+        if (RunningSince is not { } start)
+            return null;
+
+        var elapsed = DateTime.Now - start;
+        if (elapsed < TimeSpan.Zero)
+            elapsed = TimeSpan.Zero;
+
+        if (elapsed.TotalHours >= 1)
+            return $"{(int)elapsed.TotalHours}h";
+        if (elapsed.TotalMinutes >= 1)
+            return $"{(int)elapsed.TotalMinutes}m";
+        return $"{(int)elapsed.TotalSeconds}s";
+    }
 }

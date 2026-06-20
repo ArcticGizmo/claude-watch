@@ -62,6 +62,10 @@ internal sealed class IndicatorTooltipForm : Form
             _                            => ("idle",             IdleColor),
         };
 
+        // Show how long the current run has been going next to the status.
+        if (session.Status == SessionStatus.Running && session.RunningElapsedLabel() is { } elapsed)
+            _statusText = $"running · {elapsed}";
+
         using var nameFont     = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
         using var statusFont   = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
         using var modeFont     = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);

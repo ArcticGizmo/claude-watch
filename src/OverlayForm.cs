@@ -55,6 +55,7 @@ internal sealed class OverlayForm : Form
 
     private readonly System.Windows.Forms.Timer _flashTimer;
     private readonly System.Windows.Forms.Timer _flashStopTimer;
+    private readonly System.Windows.Forms.Timer _tickTimer;
 
     public event EventHandler? ExitRequested;
     public event Action<string>? SessionFocused;
@@ -87,6 +88,10 @@ internal sealed class OverlayForm : Form
             Invalidate();
         };
 
+        // Ticks the elapsed run-time labels while the panel is expanded with a running session.
+        _tickTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _tickTimer.Tick += (_, _) => Invalidate();
+
         ContextMenuStrip = BuildContextMenu();
     }
 
@@ -117,7 +122,18 @@ internal sealed class OverlayForm : Form
         }
 
         UpdateHeight();
+        UpdateTickTimer();
         Invalidate();
+    }
+
+    // The run-time labels only need a per-second repaint when they're actually on screen.
+    private void UpdateTickTimer()
+    {
+        bool need = _expanded && _sessions.Any(s => s.Status == SessionStatus.Running);
+        if (need && !_tickTimer.Enabled)
+            _tickTimer.Start();
+        else if (!need && _tickTimer.Enabled)
+            _tickTimer.Stop();
     }
 
     public void TriggerAttention()
@@ -127,6 +143,7 @@ internal sealed class OverlayForm : Form
         {
             _expanded = true;
             UpdateHeight();
+            UpdateTickTimer();
         }
 
         _attentionFlash = true;
@@ -318,10 +335,12 @@ internal sealed class OverlayForm : Form
             g.FillRectangle(hoverBrush, 1, top + 1, ClientSize.Width - 2, RowHeight - 1);
         }
 
-        // A running session with a parsed tool call gets a second, dimmer activity line; without
-        // one the project name stays vertically centred as before.
-        var activity   = session.Status == SessionStatus.Running ? session.Activity : null;
-        bool twoLine   = !string.IsNullOrEmpty(activity);
+        // A running session gets a second, dimmer line: the parsed tool call on the left and the
+        // elapsed run time on the right. Without either the project name stays vertically centred.
+        bool running   = session.Status == SessionStatus.Running;
+        var activity   = running ? session.Activity : null;
+        var elapsed    = running ? session.RunningElapsedLabel() : null;
+        bool twoLine   = !string.IsNullOrEmpty(activity) || !string.IsNullOrEmpty(elapsed);
         int nameMidY   = twoLine ? top + RowHeight / 2 - 8 : midY;
 
         var dotColor = session.Status switch
@@ -376,12 +395,28 @@ internal sealed class OverlayForm : Form
 
         if (twoLine)
         {
-            int activityMidY  = top + RowHeight / 2 + 9;
-            int activityMaxW  = ClientSize.Width - (HorizPad + 14) - HorizPad;
-            var activityTrunc = TruncateString(g, activity!, activityFont, activityMaxW);
-            var activitySz    = g.MeasureString(activityTrunc, activityFont);
-            g.DrawString(activityTrunc, activityFont, mutedBrush,
-                HorizPad + 14, activityMidY - activitySz.Height / 2);
+            int activityMidY = top + RowHeight / 2 + 9;
+            int lineLeft     = HorizPad + 14;
+
+            // Elapsed run time, right-aligned and dim.
+            int elapsedW = 0;
+            if (!string.IsNullOrEmpty(elapsed))
+            {
+                var elapsedSz = g.MeasureString(elapsed, activityFont);
+                elapsedW = (int)elapsedSz.Width;
+                g.DrawString(elapsed, activityFont, mutedBrush,
+                    ClientSize.Width - HorizPad - elapsedW, activityMidY - elapsedSz.Height / 2);
+            }
+
+            // Activity phrase fills the remaining width to the left of the elapsed time.
+            if (!string.IsNullOrEmpty(activity))
+            {
+                int activityMaxW  = ClientSize.Width - lineLeft - HorizPad - (elapsedW > 0 ? elapsedW + 6 : 0);
+                var activityTrunc = TruncateString(g, activity, activityFont, activityMaxW);
+                var activitySz    = g.MeasureString(activityTrunc, activityFont);
+                g.DrawString(activityTrunc, activityFont, mutedBrush,
+                    lineLeft, activityMidY - activitySz.Height / 2);
+            }
         }
     }
 
@@ -489,6 +524,7 @@ internal sealed class OverlayForm : Form
             {
                 _expanded = !_expanded;
                 UpdateHeight();
+                UpdateTickTimer();
                 Invalidate();
             }
         }
@@ -547,6 +583,7 @@ internal sealed class OverlayForm : Form
         {
             _flashTimer.Dispose();
             _flashStopTimer.Dispose();
+            _tickTimer.Dispose();
         }
         base.Dispose(disposing);
     }
