@@ -11,10 +11,15 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // reconciliation scan keeps state honest even if a change notification is missed.
     private const int ReconcileIntervalMs = 30_000;
 
+    // Account-wide rate-limit usage changes slowly; poll on startup then every 5 minutes.
+    private const int UsageIntervalMs = 300_000;
+
     private readonly OverlayForm _overlay;
     private readonly SessionMonitor _monitor;
+    private readonly UsageMonitor _usageMonitor = new();
     private readonly System.Windows.Forms.Timer _reconcileTimer;
     private readonly System.Windows.Forms.Timer _deadlineTimer;
+    private readonly System.Windows.Forms.Timer _usageTimer;
     private readonly NotifyIcon _notifyIcon;
     private readonly Dictionary<string, SessionIndicatorForm> _indicators = new();
     private readonly AppSettings _settings;
@@ -58,8 +63,16 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         var updateItem = new ToolStripMenuItem("Check for Updates...");
         updateItem.Click += (_, _) => CheckForUpdates();
 
+        var usageItem = new ToolStripMenuItem("Show usage limits")
+        {
+            Checked      = _settings.ShowUsage,
+            CheckOnClick = true,
+        };
+        usageItem.CheckedChanged += OnUsageToggled;
+
         trayMenu.Items.Add(showItem);
         trayMenu.Items.Add(_displayMenu);
+        trayMenu.Items.Add(usageItem);
         trayMenu.Items.Add(BuildPermissionMenu());
         trayMenu.Items.Add(updateItem);
         trayMenu.Items.Add(new ToolStripSeparator());
@@ -83,8 +96,56 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _reconcileTimer.Tick += (_, _) => _monitor.Scan();
         _reconcileTimer.Start();
 
+        // Periodic account-usage refresh for the overlay's session/weekly bars. Only runs while
+        // the feature is enabled — when off, no OAuth query is ever made.
+        _usageTimer = new System.Windows.Forms.Timer { Interval = UsageIntervalMs };
+        _usageTimer.Tick += (_, _) => RefreshUsage();
+
         _overlay.Show();
+        _overlay.SetUsageEnabled(_settings.ShowUsage);
         _monitor.Scan();
+
+        if (_settings.ShowUsage)
+        {
+            _usageTimer.Start();
+            RefreshUsage();
+        }
+    }
+
+    // Toggles the usage bars. Disabling stops all polling so no OAuth query ever goes out;
+    // enabling kicks off an immediate refresh and resumes the timer.
+    private void OnUsageToggled(object? sender, EventArgs e)
+    {
+        if (sender is not ToolStripMenuItem item || _settings.ShowUsage == item.Checked)
+            return;
+
+        _settings.ShowUsage = item.Checked;
+        _settings.Save();
+        _overlay.SetUsageEnabled(_settings.ShowUsage);
+
+        if (_settings.ShowUsage)
+        {
+            _usageTimer.Start();
+            RefreshUsage();
+        }
+        else
+        {
+            _usageTimer.Stop();
+        }
+    }
+
+    // Fetches usage off the UI thread, then pushes the result back onto it for rendering.
+    private async void RefreshUsage()
+    {
+        if (!_settings.ShowUsage) return;
+        var info = await _usageMonitor.FetchAsync();
+        try
+        {
+            if (_overlay.IsHandleCreated && !_overlay.IsDisposed)
+                _overlay.BeginInvoke((Action)(() => _overlay.UpdateUsage(info)));
+        }
+        catch (ObjectDisposedException) { }
+        catch (InvalidOperationException) { }
     }
 
     private ToolStripMenuItem BuildDisplayMenu()
@@ -373,6 +434,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         _reconcileTimer.Stop();
         _deadlineTimer.Stop();
+        _usageTimer.Stop();
         _notifyIcon.Visible = false;
         foreach (var indicator in _indicators.Values) indicator.Close();
         _overlay.Close();
@@ -384,6 +446,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         {
             _reconcileTimer.Dispose();
             _deadlineTimer.Dispose();
+            _usageTimer.Dispose();
             _monitor.Dispose();
             _notifyIcon.Icon?.Dispose();
             _notifyIcon.Dispose();

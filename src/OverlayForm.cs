@@ -12,13 +12,15 @@ namespace ClaudeWatch;
 internal sealed class OverlayForm : Form
 {
     // ── Layout ────────────────────────────────────────────────────────────────
-    private const int FormWidth     = 280;
-    private const int CompactHeight = 44;
-    private const int RowHeight     = 46;
-    private const int SubRowHeight  = 24;
-    private const int SubIndent     = 22;
-    private const int HorizPad      = 12;
-    private const int Corner        = 10;
+    private const int FormWidth       = 280;
+    private const int HeaderHeight    = 44;
+    private const int BarRowHeight    = 18;
+    private const int UsageStripHeight= 50;  // two usage bars + padding, shown only when expanded
+    private const int RowHeight        = 46;
+    private const int SubRowHeight      = 24;
+    private const int SubIndent         = 22;
+    private const int HorizPad          = 12;
+    private const int Corner            = 10;
 
     // ── Palette ───────────────────────────────────────────────────────────────
     private static readonly Color BgColor        = Color.FromArgb(15,  15,  20);
@@ -34,6 +36,8 @@ internal sealed class OverlayForm : Form
     private static readonly Color RowHoverColor  = Color.FromArgb(25,  25,  38);
     private static readonly Color SubAgentColor  = Color.FromArgb(56,  189, 248);
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
+    private static readonly Color UsageRedColor  = Color.FromArgb(239, 68,  68);
+    private static readonly Color UsageTrackColor= Color.FromArgb(38,  38,  52);
 
     // ── State ─────────────────────────────────────────────────────────────────
     // A flat render list of parent-session rows interleaved with their running sub-agent
@@ -53,9 +57,18 @@ internal sealed class OverlayForm : Form
     private int   _hoveredRow = -1;
     private bool  _attentionFlash;
 
+    private UsageInfo _usage = UsageInfo.Empty;
+    private bool _usageEnabled = true;
+    private bool _inUsageStrip;
+    private readonly UsageTooltipForm _usageTooltip = new();
+
+    // Top of the session rows when expanded: header, plus the usage strip when it's shown.
+    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+
     private readonly System.Windows.Forms.Timer _flashTimer;
     private readonly System.Windows.Forms.Timer _flashStopTimer;
     private readonly System.Windows.Forms.Timer _tickTimer;
+    private readonly System.Windows.Forms.Timer _usageHoverTimer;
 
     public event EventHandler? ExitRequested;
     public event Action<string>? SessionFocused;
@@ -74,7 +87,7 @@ internal sealed class OverlayForm : Form
 
         var screen = Screen.PrimaryScreen!.WorkingArea;
         Location   = new Point(screen.Right - FormWidth - 16, screen.Top + 16);
-        ClientSize = new Size(FormWidth, CompactHeight);
+        ClientSize = new Size(FormWidth, HeaderHeight);
 
         _flashTimer = new System.Windows.Forms.Timer { Interval = 500 };
         _flashTimer.Tick += (_, _) => { _attentionFlash = !_attentionFlash; Invalidate(); };
@@ -91,6 +104,15 @@ internal sealed class OverlayForm : Form
         // Ticks the elapsed run-time labels while the panel is expanded with a running session.
         _tickTimer = new System.Windows.Forms.Timer { Interval = 1000 };
         _tickTimer.Tick += (_, _) => Invalidate();
+
+        // One-shot dwell timer: pops the usage tooltip 150ms after the cursor enters the bar strip.
+        _usageHoverTimer = new System.Windows.Forms.Timer { Interval = 200 };
+        _usageHoverTimer.Tick += (_, _) =>
+        {
+            _usageHoverTimer.Stop();
+            if (_inUsageStrip && !_dragging)
+                ShowUsageTooltip();
+        };
 
         ContextMenuStrip = BuildContextMenu();
     }
@@ -123,6 +145,30 @@ internal sealed class OverlayForm : Form
 
         UpdateHeight();
         UpdateTickTimer();
+        Invalidate();
+    }
+
+    // Latest account-wide rate-limit usage, rendered as the two bars under the banner.
+    public void UpdateUsage(UsageInfo usage)
+    {
+        _usage = usage;
+        if (_usageEnabled && _usageTooltip.Visible)
+            ShowUsageTooltip();  // refresh the tooltip in place if it's currently open
+        Invalidate();
+    }
+
+    // Toggles the usage strip on/off. When off, the strip is hidden and reserves no space.
+    public void SetUsageEnabled(bool enabled)
+    {
+        if (_usageEnabled == enabled) return;
+        _usageEnabled = enabled;
+        if (!enabled)
+        {
+            _usageHoverTimer.Stop();
+            _inUsageStrip = false;
+            HideUsageTooltip();
+        }
+        UpdateHeight();
         Invalidate();
     }
 
@@ -160,7 +206,7 @@ internal sealed class OverlayForm : Form
     // Y offset (from the top of the form) of the row at the given index.
     private int RowTop(int index)
     {
-        int top = CompactHeight;
+        int top = RowsTop;
         for (int i = 0; i < index; i++)
             top += HeightOf(_rows[i]);
         return top;
@@ -168,9 +214,11 @@ internal sealed class OverlayForm : Form
 
     private void UpdateHeight()
     {
-        int h = CompactHeight;
+        int h = HeaderHeight;
         if (_expanded && _rows.Count > 0)
         {
+            if (_usageEnabled)
+                h += UsageStripHeight;  // usage bars sit between the header and the rows
             foreach (var row in _rows)
                 h += HeightOf(row);
             h += 2;
@@ -200,13 +248,17 @@ internal sealed class OverlayForm : Form
         DrawHeader(g);
 
         if (_expanded)
+        {
+            if (_usageEnabled)
+                DrawUsageBars(g);
             for (int i = 0; i < _rows.Count; i++)
                 DrawRow(g, i);
+        }
     }
 
     private void DrawHeader(Graphics g)
     {
-        int midY = CompactHeight / 2;
+        int midY = HeaderHeight / 2;
 
         using var labelFont = new Font("Segoe UI", 8f,  FontStyle.Regular, GraphicsUnit.Point);
         using var countFont = new Font("Segoe UI", 9f,  FontStyle.Bold,    GraphicsUnit.Point);
@@ -268,6 +320,101 @@ internal sealed class OverlayForm : Form
         var sz    = g.MeasureString(label, font);
         g.DrawString(label, font, textBrush, x, midY - sz.Height / 2);
         return x + (int)sz.Width + 8;
+    }
+
+    // ── Usage bars ─────────────────────────────────────────────────────────────
+    // Two always-visible bars below the banner: the 5-hour ("Session") and 7-day ("Weekly")
+    // rate-limit windows. Dimmed when the data is stale/unavailable.
+    private void DrawUsageBars(Graphics g)
+    {
+        bool stale = _usage.IsStale(DateTime.Now);
+
+        using var capFont = new Font("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
+        using var pctFont = new Font("Segoe UI", 7.5f, FontStyle.Bold,    GraphicsUnit.Point);
+
+        int top = HeaderHeight + 2;
+        DrawUsageBar(g, top,                 "Session", _usage.FiveHourPercent, stale, capFont, pctFont);
+        DrawUsageBar(g, top + BarRowHeight,  "Weekly",  _usage.SevenDayPercent, stale, capFont, pctFont);
+    }
+
+    private void DrawUsageBar(Graphics g, int rowTop, string caption, double? percent,
+                              bool stale, Font capFont, Font pctFont)
+    {
+        const int CaptionW = 46;
+        const int PctW     = 34;
+        const int TrackH   = 7;
+
+        int midY = rowTop + BarRowHeight / 2;
+
+        // Caption (left)
+        Color capColor = stale ? Blend(MutedColor, BgColor, 0.5f) : MutedColor;
+        using (var capBrush = new SolidBrush(capColor))
+        {
+            var capSz = g.MeasureString(caption, capFont);
+            g.DrawString(caption, capFont, capBrush, HorizPad, midY - capSz.Height / 2);
+        }
+
+        // Track
+        int trackLeft  = HorizPad + CaptionW;
+        int trackRight = ClientSize.Width - HorizPad - PctW;
+        int trackW     = Math.Max(0, trackRight - trackLeft);
+        int trackY     = midY - TrackH / 2;
+
+        Color trackColor = stale ? Blend(UsageTrackColor, BgColor, 0.4f) : UsageTrackColor;
+        using (var trackBrush = new SolidBrush(trackColor))
+            FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
+
+        // Fill + percentage text
+        string pctText;
+        Color textColor;
+        if (percent is { } p)
+        {
+            double clamped = Math.Clamp(p, 0, 100);
+            Color barColor = UsageColor(clamped);
+            if (stale) barColor = Blend(barColor, BgColor, 0.5f);
+
+            int fillW = (int)Math.Round(trackW * clamped / 100.0);
+            if (fillW > 0)
+                using (var fillBrush = new SolidBrush(barColor))
+                    FillRoundedBar(g, fillBrush, trackLeft, trackY, fillW, TrackH);
+
+            pctText   = $"{(int)Math.Round(clamped)}%";
+            textColor = barColor;
+        }
+        else
+        {
+            pctText   = "—";
+            textColor = capColor;
+        }
+
+        using var textBrush = new SolidBrush(textColor);
+        var txtSz = g.MeasureString(pctText, pctFont);
+        g.DrawString(pctText, pctFont, textBrush,
+            ClientSize.Width - HorizPad - txtSz.Width, midY - txtSz.Height / 2);
+    }
+
+    // Colour thresholds: <50 green, 50–75 yellow, 75–90 orange, 90+ red.
+    private static Color UsageColor(double pct) => pct switch
+    {
+        < 50 => RunningColor,
+        < 75 => AwaitingColor,
+        < 90 => AttentionColor,
+        _    => UsageRedColor,
+    };
+
+    // Blends two opaque colours (t = weight of b), so dimmed bars stay crisp over the panel bg.
+    private static Color Blend(Color a, Color b, float t) => Color.FromArgb(
+        (int)(a.R * (1 - t) + b.R * t),
+        (int)(a.G * (1 - t) + b.G * t),
+        (int)(a.B * (1 - t) + b.B * t));
+
+    private static void FillRoundedBar(Graphics g, Brush brush, int x, int y, int w, int h)
+    {
+        if (w <= 0) return;
+        int r = Math.Min(h / 2, w / 2);
+        if (r <= 0) { g.FillRectangle(brush, x, y, w, h); return; }
+        using var path = RoundedRect(new Rectangle(x, y, w, h), r);
+        g.FillPath(brush, path);
     }
 
     private void DrawRow(Graphics g, int rowIdx)
@@ -469,7 +616,7 @@ internal sealed class OverlayForm : Form
     // ── Mouse interaction ────────────────────────────────────────────────────
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left && e.Y < CompactHeight)
+        if (e.Button == MouseButtons.Left && e.Y < HeaderHeight)
         {
             _dragging       = true;
             _wasDrag        = false;
@@ -501,6 +648,23 @@ internal sealed class OverlayForm : Form
                 _hoveredRow = newHover;
                 Invalidate();
             }
+
+            // Dwell over the usage strip (only present when expanded) pops a details/staleness tooltip.
+            bool inStrip = _expanded && _usageEnabled && e.Y >= HeaderHeight && e.Y < RowsTop;
+            if (inStrip != _inUsageStrip)
+            {
+                _inUsageStrip = inStrip;
+                if (inStrip)
+                {
+                    _usageHoverTimer.Stop();
+                    _usageHoverTimer.Start();
+                }
+                else
+                {
+                    _usageHoverTimer.Stop();
+                    HideUsageTooltip();
+                }
+            }
         }
 
         base.OnMouseMove(e);
@@ -520,7 +684,7 @@ internal sealed class OverlayForm : Form
                 if (int.TryParse(pid, out int pidInt))
                     NativeMethods.FocusTerminalForProcess(pidInt);
             }
-            else if (e.Y < CompactHeight && _sessions.Count > 0)
+            else if (e.Y < HeaderHeight && _sessions.Count > 0)
             {
                 _expanded = !_expanded;
                 UpdateHeight();
@@ -537,14 +701,30 @@ internal sealed class OverlayForm : Form
     protected override void OnMouseLeave(EventArgs e)
     {
         _hoveredRow = -1;
+        _inUsageStrip = false;
+        _usageHoverTimer.Stop();
+        HideUsageTooltip();
         Invalidate();
         base.OnMouseLeave(e);
     }
 
+    // ── Usage tooltip ──────────────────────────────────────────────────────────
+    private void ShowUsageTooltip()
+    {
+        var stripScreen = RectangleToScreen(new Rectangle(0, HeaderHeight, ClientSize.Width, UsageStripHeight));
+        _usageTooltip.ShowFor(_usage, stripScreen);
+    }
+
+    private void HideUsageTooltip()
+    {
+        if (_usageTooltip.Visible)
+            _usageTooltip.Hide();
+    }
+
     private int HitTestRow(Point p)
     {
-        if (!_expanded || p.Y < CompactHeight) return -1;
-        int y = CompactHeight;
+        if (!_expanded || p.Y < RowsTop) return -1;
+        int y = RowsTop;
         for (int i = 0; i < _rows.Count; i++)
         {
             int h = HeightOf(_rows[i]);
@@ -584,6 +764,8 @@ internal sealed class OverlayForm : Form
             _flashTimer.Dispose();
             _flashStopTimer.Dispose();
             _tickTimer.Dispose();
+            _usageHoverTimer.Dispose();
+            _usageTooltip.Dispose();
         }
         base.Dispose(disposing);
     }
