@@ -36,7 +36,10 @@ Automatically close the open state 750ms after the cursor leaves the UI.
 When a session needs attention while collapsed in dense mode, flash the border **and** auto-open the hover-expanded popup (which then auto-closes after the cursor leaves), mirroring how floating mode auto-expands to surface the project that needs you.
 
 ## Dragging
-When in dense mode, dragging on the header only adjusts position **vertically** — the strip stays hugging the right edge of the screen horizontally. (Multi-monitor handling is deferred for now; the strip simply hugs the right side of the screen.)
+When in dense mode, dragging on the header only adjusts position **vertically** — the strip stays hugging the right edge of its current monitor horizontally.
+
+### Multi-monitor
+While dragging the dense strip, every *other* monitor shows a narrow right-edge drop lane (a translucent column with a `->|` pin hint). The lane under the cursor highlights; releasing the drag over a lane re-pins the strip to that monitor's right edge at the release height. The docked monitor is remembered by device name, so if that monitor is later disconnected the strip self-heals back to the primary screen (also re-checked whenever the display configuration changes).
 
 ## Leaving dense mode
 Floating and dense modes maintain their own sets of coordinates separately. When you leave dense mode, the floating UI is restored to wherever it was last dragged.

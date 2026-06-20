@@ -81,6 +81,12 @@ internal sealed class OverlayForm : Form
     private bool  _denseYInit;
     private Point _floatingLoc;
 
+    // Which monitor the dense strip is docked to, stored by device name so a stale Screen object
+    // can't pin us to a monitor that's been disconnected. Null means the primary screen.
+    private string? _denseScreenDevice;
+    private readonly List<DenseDropZoneForm> _dropZones = [];
+    private DenseDropZoneForm? _activeDropZone;
+
     private UsageInfo _usage = UsageInfo.Empty;
     private bool _usageEnabled = true;
     private bool _inUsageStrip;
@@ -158,6 +164,16 @@ internal sealed class OverlayForm : Form
         };
 
         ContextMenuStrip = BuildContextMenu();
+
+        // If a monitor is added or removed, re-evaluate the dense docking; DenseScreen() resets to
+        // the primary screen when the monitor we were pinned to has disappeared.
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        if (InvokeRequired) { BeginInvoke(new Action(() => OnDisplaySettingsChanged(sender, e))); return; }
+        if (_dense) { RelayoutWindow(); Invalidate(); }
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -268,7 +284,7 @@ internal sealed class OverlayForm : Form
 
         if (_dense)
         {
-            var wa = Screen.PrimaryScreen!.WorkingArea;
+            var wa = DenseScreen().WorkingArea;
             int w  = _denseOpen ? FormWidth : DenseClosedWidth;
             int h  = _denseOpen ? FullPanelHeight() : DenseStripHeight();
             Location   = new Point(wa.Right - w, ClampDenseY(_denseY, h, wa));
@@ -310,6 +326,68 @@ internal sealed class OverlayForm : Form
     // Keeps the dense strip fully on screen vertically as its height changes with the session count.
     private static int ClampDenseY(int y, int height, Rectangle wa) =>
         Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - height));
+
+    // Resolves the monitor the dense strip docks to. If the remembered monitor has been
+    // disconnected, it self-heals by forgetting it and falling back to the primary screen.
+    private Screen DenseScreen()
+    {
+        if (_denseScreenDevice != null)
+        {
+            foreach (var s in Screen.AllScreens)
+                if (s.DeviceName == _denseScreenDevice)
+                    return s;
+            _denseScreenDevice = null;  // monitor vanished — reset to primary
+        }
+        return Screen.PrimaryScreen!;
+    }
+
+    // ── Dense drop zones (multi-monitor) ────────────────────────────────────────
+    // While dragging the dense strip, every *other* monitor gets a right-edge drop lane; releasing
+    // over one re-pins the strip to that monitor. Shown only on a real drag with 2+ monitors.
+    private void ShowDropZones()
+    {
+        if (_dropZones.Count > 0 || Screen.AllScreens.Length < 2) return;
+
+        var current = DenseScreen();
+        foreach (var s in Screen.AllScreens)
+        {
+            if (s.DeviceName == current.DeviceName) continue;
+            var zone = new DenseDropZoneForm(s);
+            _dropZones.Add(zone);
+            zone.Show();
+        }
+    }
+
+    private void UpdateActiveDropZone(Point screenPt)
+    {
+        DenseDropZoneForm? hit = null;
+        foreach (var z in _dropZones)
+            if (z.ContainsScreenPoint(screenPt)) { hit = z; break; }
+
+        if (hit == _activeDropZone) return;
+        _activeDropZone?.SetActive(false);
+        _activeDropZone = hit;
+        _activeDropZone?.SetActive(true);
+    }
+
+    private void HideDropZones()
+    {
+        foreach (var z in _dropZones) z.Dispose();
+        _dropZones.Clear();
+        _activeDropZone = null;
+    }
+
+    // Re-pins the dense strip to the monitor whose drop lane the cursor was released over,
+    // dropping it at the release height (clamped onto that monitor).
+    private void PinToActiveDropZone()
+    {
+        if (_activeDropZone == null) return;
+        var screen = _activeDropZone.TargetScreen;
+        _denseScreenDevice = screen.DeviceName;
+        _denseY = ClampDenseY(Cursor.Position.Y - Height / 2, Height, screen.WorkingArea);
+        RelayoutWindow();
+        Invalidate();
+    }
 
     // ── Dense mode transitions ─────────────────────────────────────────────────
     public void ToggleDense()
@@ -877,17 +955,22 @@ internal sealed class OverlayForm : Form
             int dy  = cur.Y - _dragStartScreen.Y;
 
             if (!_wasDrag && (Math.Abs(dx) > 4 || Math.Abs(dy) > 4))
+            {
                 _wasDrag = true;
+                if (_dense) ShowDropZones();
+            }
 
             if (_wasDrag)
             {
                 if (_dense)
                 {
-                    // Dense stays hugging the right screen edge; only the vertical position moves.
-                    var wa   = Screen.PrimaryScreen!.WorkingArea;
+                    // Dense stays hugging the current monitor's right edge, moving only vertically;
+                    // drop lanes on other monitors let it be re-pinned on release.
+                    var wa   = DenseScreen().WorkingArea;
                     int newY = ClampDenseY(_formStartLoc.Y + dy, Height, wa);
                     Location = new Point(wa.Right - Width, newY);
                     _denseY  = newY;
+                    UpdateActiveDropZone(cur);
                 }
                 else
                 {
@@ -932,6 +1015,11 @@ internal sealed class OverlayForm : Form
         bool wasDrag = _wasDrag;
         _dragging = false;
         _wasDrag  = false;
+
+        // A dense drag released over another monitor's drop lane re-pins the strip there.
+        if (wasDrag && _dense && _activeDropZone != null)
+            PinToActiveDropZone();
+        HideDropZones();
 
         if (e.Button == MouseButtons.Left && !wasDrag)
         {
@@ -986,8 +1074,9 @@ internal sealed class OverlayForm : Form
         _usageHoverTimer.Stop();
         HideUsageTooltip();
 
-        // Start the 2-second countdown to collapse the dense popup back to the strip.
-        if (_dense && _denseOpen)
+        // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
+        // where the cursor legitimately roams to another monitor's drop lane.
+        if (_dense && _denseOpen && !_dragging)
             _denseCloseTimer.Start();
 
         Invalidate();
@@ -1081,6 +1170,8 @@ internal sealed class OverlayForm : Form
     {
         if (disposing)
         {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            HideDropZones();
             _flashTimer.Dispose();
             _flashStopTimer.Dispose();
             _tickTimer.Dispose();
