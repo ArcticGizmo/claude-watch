@@ -31,7 +31,6 @@ internal sealed class OverlayForm : Form
     private const int DenseBottomPad   = 8;
 
     // Header right-side glyphs (the dense toggle icon and the expand chevron).
-    private const int ChevronBoxW = 14;
     private const int IconBoxW    = 16;
     private const int IconBoxH    = 16;
     private const int IconGap     = 6;
@@ -147,9 +146,9 @@ internal sealed class OverlayForm : Form
                 ShowUsageTooltip();
         };
 
-        // Collapses the hover-opened dense popup once the cursor has been away for 2 seconds.
+        // Collapses the hover-opened dense popup once the cursor has been away for 750ms.
         // Re-validated against the live cursor position so a quick out-and-back keeps it open.
-        _denseCloseTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+        _denseCloseTimer = new System.Windows.Forms.Timer { Interval = 750 };
         _denseCloseTimer.Tick += (_, _) =>
         {
             if (_dense && _denseOpen && !Bounds.Contains(Cursor.Position))
@@ -443,23 +442,24 @@ internal sealed class OverlayForm : Form
         // leaves dense mode; plain (->|) while floating, where clicking it enters dense mode.
         DrawSideCollapseIcon(g, SideIconRect(), reversed: _dense);
 
-        // Expand chevron — floating mode only (hidden in dense), and only when there's something to expand.
+        // Expand chevron — floating mode only (hidden in dense), and only when there's something to
+        // expand. Sits just to the left of the dense toggle icon.
         if (!_dense && _sessions.Count > 0)
         {
             var chevron = _expanded ? "▲" : "▼";
             var chSz    = g.MeasureString(chevron, chevFont);
             g.DrawString(chevron, chevFont, muted,
-                ClientSize.Width - HorizPad - chSz.Width,
+                ClientSize.Width - HorizPad - IconBoxW - IconGap - chSz.Width,
                 midY - chSz.Height / 2);
         }
     }
 
-    // Hit-box for the dense toggle glyph. In dense mode (no chevron) it takes the rightmost slot;
-    // in floating mode it sits just left of the chevron column.
+    // Hit-box for the dense toggle glyph. It always takes the rightmost slot in the header; in
+    // floating mode the expand chevron sits to its left.
     private Rectangle SideIconRect()
     {
         int top   = (HeaderHeight - IconBoxH) / 2;
-        int right = ClientSize.Width - HorizPad - (_dense ? 0 : ChevronBoxW + IconGap);
+        int right = ClientSize.Width - HorizPad;
         return new Rectangle(right - IconBoxW, top, IconBoxW, IconBoxH);
     }
 
@@ -927,7 +927,13 @@ internal sealed class OverlayForm : Form
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left && !_wasDrag)
+        // Clear the drag state first: the click handlers below call RelayoutWindow(), which
+        // no-ops while a drag is in progress.
+        bool wasDrag = _wasDrag;
+        _dragging = false;
+        _wasDrag  = false;
+
+        if (e.Button == MouseButtons.Left && !wasDrag)
         {
             bool headerVisible = !(_dense && !_denseOpen);
 
@@ -959,8 +965,6 @@ internal sealed class OverlayForm : Form
             }
         }
 
-        _dragging = false;
-        _wasDrag  = false;
         base.OnMouseUp(e);
     }
 

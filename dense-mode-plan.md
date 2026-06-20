@@ -31,9 +31,9 @@ When you hover over the closed strip, it expands to show the standard expanded U
 
 In this hover-expanded UI, the side-collapse icon is drawn in its **reversed** form (`|<-`). Clicking the reversed icon leaves dense mode and returns to the floating UI.
 
-Automatically close the open state if there is no cursor action over the UI for 2 seconds.
+Automatically close the open state 750ms after the cursor leaves the UI.
 
-When a session needs attention while collapsed in dense mode, flash the border **and** auto-open the hover-expanded popup (which then auto-closes after 2 seconds), mirroring how floating mode auto-expands to surface the project that needs you.
+When a session needs attention while collapsed in dense mode, flash the border **and** auto-open the hover-expanded popup (which then auto-closes after the cursor leaves), mirroring how floating mode auto-expands to surface the project that needs you.
 
 ## Dragging
 When in dense mode, dragging on the header only adjusts position **vertically** — the strip stays hugging the right edge of the screen horizontally. (Multi-monitor handling is deferred for now; the strip simply hugs the right side of the screen.)
