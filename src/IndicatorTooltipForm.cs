@@ -171,16 +171,10 @@ internal sealed class IndicatorTooltipForm : Form
         var color = ModeColor(mode);
         using var brush = new SolidBrush(color);
 
-        if (mode == PermissionMode.Plan)
-        {
-            g.FillRectangle(brush, x,     midY - 4, 3, 8);
-            g.FillRectangle(brush, x + 5, midY - 4, 3, 8);
-        }
-        else
-        {
-            g.FillPolygon(brush, new[] { new Point(x,     midY - 4), new Point(x + 5,  midY), new Point(x,     midY + 4) });
-            g.FillPolygon(brush, new[] { new Point(x + 6, midY - 4), new Point(x + 11, midY), new Point(x + 6, midY + 4) });
-        }
+        // All permission modes render as a fast-forward (double-chevron) badge, distinguished by
+        // colour (Plan is blue). A pause-style badge read too much like an idle session.
+        g.FillPolygon(brush, new[] { new Point(x,     midY - 4), new Point(x + 5,  midY), new Point(x,     midY + 4) });
+        g.FillPolygon(brush, new[] { new Point(x + 6, midY - 4), new Point(x + 11, midY), new Point(x + 6, midY + 4) });
     }
 
     private static GraphicsPath RoundedRect(Rectangle r, int radius)
