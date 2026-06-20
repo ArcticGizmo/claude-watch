@@ -136,6 +136,66 @@ internal sealed class ToggleSwitch : Control
     }
 }
 
+/// <summary>A small indeterminate spinner (a ring of fading dots) for async operations.
+/// Hidden until <see cref="Start"/> is called; stops and hides on <see cref="Stop"/>.</summary>
+internal sealed class Spinner : Control
+{
+    private const int Dots = 8;
+    private readonly System.Windows.Forms.Timer _timer;
+    private int _tick;
+
+    public Spinner()
+    {
+        Size           = new Size(16, 16);
+        DoubleBuffered = true;
+        BackColor      = Theme.FormBg;
+        Visible        = false;
+        _timer = new System.Windows.Forms.Timer { Interval = 90 };
+        _timer.Tick += (_, _) => { _tick = (_tick + 1) % Dots; Invalidate(); };
+    }
+
+    public void Start()
+    {
+        Visible = true;
+        if (!_timer.Enabled) _timer.Start();
+    }
+
+    public void Stop()
+    {
+        _timer.Stop();
+        Visible = false;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        float cx = Width / 2f, cy = Height / 2f;
+        float r = Math.Min(Width, Height) / 2f - 2f;
+        const float dotR = 1.6f;
+
+        for (int i = 0; i < Dots; i++)
+        {
+            double ang = Math.PI * 2 * i / Dots - Math.PI / 2;
+            float x = cx + (float)Math.Cos(ang) * r;
+            float y = cy + (float)Math.Sin(ang) * r;
+
+            // The dot leading the rotation is brightest; trailing dots fade out.
+            int dist  = (i - _tick + Dots) % Dots;
+            int alpha = 40 + 215 * (Dots - 1 - dist) / (Dots - 1);
+            using var b = new SolidBrush(Color.FromArgb(alpha, Theme.Accent));
+            g.FillEllipse(b, x - dotR, y - dotR, dotR * 2, dotR * 2);
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _timer.Dispose();
+        base.Dispose(disposing);
+    }
+}
+
 /// <summary>Renders the 5-hour ("Session") and 7-day ("Weekly") usage windows as labelled
 /// progress bars, matching the overlay's bars for consistency. Shows a placeholder line when
 /// usage tracking is off or no reading is available yet.</summary>

@@ -24,6 +24,7 @@ internal sealed class SettingsForm : Form
 
     // Permission Mode section.
     private ToggleSwitch _permToggle   = null!;
+    private Spinner      _permSpinner  = null!;
     private Panel        _banner       = null!;
     private Label        _bannerLabel  = null!;
     private Button       _troubleshootBtn = null!;
@@ -143,7 +144,12 @@ internal sealed class SettingsForm : Form
     {
         _permToggle = MakeToggle();
         _permToggle.CheckedChanged += OnPermissionToggled;
-        root.Controls.Add(TitleRow("Permission Mode", _permToggle));
+        _permSpinner = new Spinner();
+        root.Controls.Add(TitleRow("Permission Mode", _permToggle, _permSpinner));
+
+        // Start in the busy state — the real toggle position isn't known until the async probe
+        // in OnShown completes, so dim the toggle and spin until then.
+        SetPermBusy(true);
 
         root.Controls.Add(BodyText(
             "A Claude Code plugin reports each session's live permission mode to Claude Watch, " +
@@ -265,6 +271,7 @@ internal sealed class SettingsForm : Form
         bool installed = health is PluginHealth.Healthy or PluginHealth.Disabled;
         bool intent    = _settings.PermissionDetectionEnabled ?? installed;
         _permToggle.SetCheckedSilently(intent);
+        SetPermBusy(false);
         ApplyHealth(health);
     }
 
@@ -274,9 +281,9 @@ internal sealed class SettingsForm : Form
         _settings.PermissionDetectionEnabled = intent;
         _settings.Save();
 
-        _permToggle.Enabled = false;
-        _bannerLabel.Text   = intent ? "Enabling detection…" : "Disabling detection…";
-        _banner.Visible     = true;
+        SetPermBusy(true);
+        _bannerLabel.Text = intent ? "Enabling detection…" : "Disabling detection…";
+        _banner.Visible   = true;
 
         if (intent) await _pluginManager.InstallAsync();
         else        await _pluginManager.UninstallAsync();
@@ -284,8 +291,17 @@ internal sealed class SettingsForm : Form
         var health = await _pluginManager.GetHealthAsync();
         if (IsDisposed) return;
 
-        _permToggle.Enabled = true;
+        SetPermBusy(false);
         ApplyHealth(health);
+    }
+
+    // Toggles the busy state of the Permission Mode control: dims the switch and spins while an
+    // install/uninstall/probe is in flight, so the snap to its real position reads as a load.
+    private void SetPermBusy(bool busy)
+    {
+        _permToggle.Enabled = !busy;
+        if (busy) _permSpinner.Start();
+        else      _permSpinner.Stop();
     }
 
     // Re-runs diagnosis: re-checks health and, unless the CLI is missing, attempts an
@@ -293,13 +309,15 @@ internal sealed class SettingsForm : Form
     private async void OnTroubleshoot()
     {
         _troubleshootBtn.Enabled = false;
-        _bannerLabel.Text        = "Diagnosing…";
+        SetPermBusy(true);
+        _bannerLabel.Text = "Diagnosing…";
 
         var health = await _pluginManager.GetHealthAsync();
         if (health == PluginHealth.CliMissing)
         {
             if (IsDisposed) return;
             _troubleshootBtn.Enabled = true;
+            SetPermBusy(false);
             _bannerLabel.Text =
                 "Claude CLI not found on PATH. Copy the install commands and run them in a Claude " +
                 "Code session, or make sure 'claude' is on your PATH, then Troubleshoot again.";
@@ -311,6 +329,7 @@ internal sealed class SettingsForm : Form
         if (IsDisposed) return;
 
         _troubleshootBtn.Enabled = true;
+        SetPermBusy(false);
         ApplyHealth(health);
         if (health != PluginHealth.Healthy)
             _bannerLabel.Text =
@@ -337,8 +356,9 @@ internal sealed class SettingsForm : Form
         Margin    = new Padding(0, 4, 0, 8),
     };
 
-    // A section header with a right-justified toggle on the same row.
-    private Panel TitleRow(string title, ToggleSwitch toggle)
+    // A section header with a right-justified toggle on the same row, optionally with a spinner
+    // sitting just to the left of the toggle.
+    private Panel TitleRow(string title, ToggleSwitch toggle, Spinner? spinner = null)
     {
         var row = new Panel
         {
@@ -358,6 +378,13 @@ internal sealed class SettingsForm : Form
         toggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
         row.Controls.Add(label);
         row.Controls.Add(toggle);
+
+        if (spinner != null)
+        {
+            spinner.Location = new Point(toggle.Left - spinner.Width - 10, (row.Height - spinner.Height) / 2);
+            spinner.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+            row.Controls.Add(spinner);
+        }
         return row;
     }
 
