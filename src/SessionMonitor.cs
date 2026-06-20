@@ -17,6 +17,11 @@ internal sealed class SessionMonitor : IDisposable
     private readonly Dictionary<string, string> _lastRawStatus = new();
     private readonly Dictionary<string, DateTime> _idleSince = new();
     private readonly HashSet<string> _awaitingInputPids = new();
+    // PIDs that had at least one running sub-agent on the previous scan, so we can detect the
+    // moment they all finish and treat it like a busy->idle completion.
+    private readonly HashSet<string> _hadRunningSubs = new();
+
+    private readonly SubAgentReader _subAgents = new();
 
     // PIDs we have an exit subscription for, keyed by the same string PID used everywhere else.
     private readonly Dictionary<string, Process> _trackedProcesses = new();
@@ -88,6 +93,7 @@ internal sealed class SessionMonitor : IDisposable
             _lastRawStatus.Remove(key);
             _idleSince.Remove(key);
             _awaitingInputPids.Remove(key);
+            _hadRunningSubs.Remove(key);
         }
 
         SyncProcessSubscriptions(activePids);
@@ -185,6 +191,36 @@ internal sealed class SessionMonitor : IDisposable
                     status = SessionStatus.Idle;
             }
 
+            // Sub-agents (Task tool) run inside this session's process and have no session file
+            // of their own; surface them from the transcript and roll their activity up.
+            var subAgents = _subAgents.GetRunning(sessionId, cwd);
+            bool hasRunningSubs = subAgents.Count > 0;
+            bool hadRunningSubs = _hadRunningSubs.Contains(pid);
+            bool subsJustFinished = hadRunningSubs && !hasRunningSubs;
+
+            if (hasRunningSubs)
+            {
+                _hadRunningSubs.Add(pid);
+                // A live sub-agent means the session is working even when Claude Code reports the
+                // parent as idle (the parent loop is simply blocked waiting on the child).
+                if (status is SessionStatus.Idle or SessionStatus.NeedsAttention)
+                {
+                    status = SessionStatus.Running;
+                    _idleSince.Remove(pid);
+                }
+            }
+            else
+            {
+                _hadRunningSubs.Remove(pid);
+                // Sub-agents finished and the parent picked nothing else up: surface it like any
+                // other busy->idle completion so the "done" alert still fires.
+                if (subsJustFinished && status == SessionStatus.Idle)
+                {
+                    _idleSince[pid] = now;
+                    status = SessionStatus.NeedsAttention;
+                }
+            }
+
             var projectName = string.IsNullOrEmpty(cwd)
                 ? sessionId[..Math.Min(8, sessionId.Length)]
                 : Path.GetFileName(
@@ -200,10 +236,11 @@ internal sealed class SessionMonitor : IDisposable
                 cwd,
                 projectName,
                 updatedAt,
-                mode
+                mode,
+                subAgents
             );
 
-            if (status == SessionStatus.NeedsAttention && prevRaw == "busy")
+            if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))
                 NeedsAttention?.Invoke(session);
 
             if (status == SessionStatus.AwaitingInput && _awaitingInputPids.Add(pid))
