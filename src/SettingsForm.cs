@@ -4,23 +4,17 @@ using System.Diagnostics;
 
 /// <summary>
 /// First-class settings window opened by left-clicking the tray icon. A single dark-themed,
-/// vertically-stacked panel with four sections: About, Permission detection (plugin),
-/// Usage, and Updates. Reads/writes the shared <see cref="AppSettings"/> instance and drives
-/// <see cref="PluginManager"/>/<see cref="UsageMonitor"/> directly; toggling usage and checking
-/// for updates are raised as events so the owning context keeps timers and the overlay in sync.
+/// vertically-stacked panel with four sections: About, Permission Mode (detection plugin),
+/// Usage limits, and Updates. Reads/writes the shared <see cref="AppSettings"/> instance and
+/// drives <see cref="PluginManager"/>/<see cref="UsageMonitor"/> directly; toggling usage and
+/// checking for updates are raised as events so the owning context keeps timers and the overlay
+/// in sync.
 /// </summary>
 internal sealed class SettingsForm : Form
 {
-    // ── Theme ───────────────────────────────────────────────────────────────────
-    private static readonly Color FormBg     = Color.FromArgb(24, 24, 32);
-    private static readonly Color Fg         = Color.FromArgb(225, 225, 235);
-    private static readonly Color Muted      = Color.FromArgb(140, 140, 160);
-    private static readonly Color Accent     = Color.FromArgb(96, 165, 250);
-    private static readonly Color BorderCol  = Color.FromArgb(45, 45, 60);
-    private static readonly Color ButtonBg   = Color.FromArgb(45, 45, 60);
-    private static readonly Color ButtonHover= Color.FromArgb(60, 60, 80);
-
-    private const int ContentWidth = 372;  // inner width inside the form padding
+    // Inner content width (~50% wider than the original 372). The client is sized to fit this
+    // plus the 16px padding either side and room for a vertical scrollbar, so nothing clips.
+    private const int ContentWidth = 552;
 
     private readonly AppSettings   _settings;
     private readonly PluginManager _pluginManager;
@@ -28,18 +22,20 @@ internal sealed class SettingsForm : Form
 
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
 
-    // Section controls we update after async work.
-    private Label    _pluginStatusLabel = null!;
-    private Label    _pluginResultLabel = null!;
-    private Button   _pluginInstallBtn  = null!;
-    private Button   _pluginUninstallBtn= null!;
-    private CheckBox _usageCheck        = null!;
-    private Label    _usageInfoLabel    = null!;
-    private Button   _usageRefreshBtn   = null!;
+    // Permission Mode section.
+    private ToggleSwitch _permToggle   = null!;
+    private Panel        _banner       = null!;
+    private Label        _bannerLabel  = null!;
+    private Button       _troubleshootBtn = null!;
+
+    // Usage section.
+    private ToggleSwitch     _usageToggle = null!;
+    private UsageBarsControl _usageBars   = null!;
+    private Button           _usageRefreshBtn = null!;
 
     private UsageInfo _usage;
 
-    /// <summary>Raised when the user toggles the "Show usage limits" checkbox (true = enabled).</summary>
+    /// <summary>Raised when the user toggles "Show usage limits" (true = enabled).</summary>
     public event Action<bool>? UsageEnabledChanged;
 
     /// <summary>Raised when the user clicks "Check for Updates".</summary>
@@ -57,10 +53,10 @@ internal sealed class SettingsForm : Form
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox     = false;
         StartPosition   = FormStartPosition.CenterScreen;
-        BackColor       = FormBg;
-        ForeColor       = Fg;
+        BackColor       = Theme.FormBg;
+        ForeColor       = Theme.Fg;
         Font            = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        ClientSize      = new Size(ContentWidth + 32, 600);
+        ClientSize      = new Size(ContentWidth + 50, 660);
         if (_icon != null)
             Icon = Icon.FromHandle(_icon.GetHicon());
 
@@ -73,6 +69,13 @@ internal sealed class SettingsForm : Form
         NativeMethods.UseDarkTitleBar(Handle);
     }
 
+    // Async work that shells out to the CLI must run after the handle exists.
+    protected override async void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        await InitPermissionStateAsync();
+    }
+
     // ── Layout ───────────────────────────────────────────────────────────────────
     private void BuildLayout()
     {
@@ -83,12 +86,12 @@ internal sealed class SettingsForm : Form
             WrapContents  = false,
             AutoScroll    = true,
             Padding       = new Padding(16),
-            BackColor     = FormBg,
+            BackColor     = Theme.FormBg,
         };
 
         BuildAboutSection(root);
         root.Controls.Add(Separator());
-        BuildPluginSection(root);
+        BuildPermissionSection(root);
         root.Controls.Add(Separator());
         BuildUsageSection(root);
         root.Controls.Add(Separator());
@@ -96,16 +99,8 @@ internal sealed class SettingsForm : Form
 
         Controls.Add(root);
 
-        // Usage display needs no I/O, so render it immediately.
-        RenderUsage();
-    }
-
-    // Probe the plugin health once the window is up (it shells out to the CLI, so it's async and
-    // must run after the handle exists — doing it in the ctor would invoke before that).
-    protected override async void OnShown(EventArgs e)
-    {
-        base.OnShown(e);
-        await RefreshPluginStatus();
+        _usageBars.SetOn(_settings.ShowUsage);
+        _usageBars.SetUsage(_usage);
     }
 
     private void BuildAboutSection(FlowLayoutPanel root)
@@ -132,7 +127,7 @@ internal sealed class SettingsForm : Form
         {
             Text      = $"Claude Watch\nv{AppInfo.Version}",
             AutoSize  = true,
-            ForeColor = Fg,
+            ForeColor = Theme.Fg,
             Margin    = new Padding(0, 2, 0, 0),
         });
         root.Controls.Add(header);
@@ -141,66 +136,82 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(LinkRow("Report an issue on GitHub", AppInfo.IssuesUrl));
     }
 
-    private void BuildPluginSection(FlowLayoutPanel root)
+    private void BuildPermissionSection(FlowLayoutPanel root)
     {
-        root.Controls.Add(SectionTitle("Permission detection"));
-        root.Controls.Add(BodyText(
-            "A Claude Code plugin reports each session's live permission mode to Claude Watch."));
+        _permToggle = MakeToggle();
+        _permToggle.CheckedChanged += OnPermissionToggled;
+        root.Controls.Add(TitleRow("Permission Mode", _permToggle));
 
-        _pluginStatusLabel = BodyText("Status: checking…");
-        _pluginStatusLabel.ForeColor = Fg;
-        root.Controls.Add(_pluginStatusLabel);
+        root.Controls.Add(BodyText(
+            "A Claude Code plugin reports each session's live permission mode to Claude Watch, " +
+            "shown as a coloured badge next to that session in the overlay:"));
+
+        root.Controls.Add(new ModeLegend { Width = ContentWidth, Margin = new Padding(0, 2, 0, 8) });
+
+        // Warning banner — only visible when detection is enabled but not actually active.
+        _banner = BuildBanner();
+        root.Controls.Add(_banner);
+    }
+
+    private Panel BuildBanner()
+    {
+        var banner = new Panel
+        {
+            Width     = ContentWidth,
+            Height    = 88,
+            BackColor = Theme.BannerBg,
+            Margin    = new Padding(0, 0, 0, 4),
+            Visible   = false,
+        };
+        banner.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Theme.BannerBorder);
+            e.Graphics.DrawRectangle(pen, 0, 0, banner.Width - 1, banner.Height - 1);
+        };
+
+        _bannerLabel = new Label
+        {
+            AutoSize    = true,
+            MaximumSize = new Size(ContentWidth - 24, 0),
+            ForeColor   = Theme.BannerFg,
+            BackColor   = Theme.BannerBg,
+            Location    = new Point(12, 10),
+        };
+        banner.Controls.Add(_bannerLabel);
 
         var buttons = ButtonRow();
-        _pluginInstallBtn   = MakeButton("Install / enable");
-        _pluginUninstallBtn = MakeButton("Uninstall");
-        _pluginInstallBtn.Click   += async (_, _) => await RunPluginAction(_pluginManager.InstallAsync);
-        _pluginUninstallBtn.Click += async (_, _) => await RunPluginAction(_pluginManager.UninstallAsync);
-        buttons.Controls.Add(_pluginInstallBtn);
-        buttons.Controls.Add(_pluginUninstallBtn);
-        root.Controls.Add(buttons);
-
-        var diag = ButtonRow();
-        var copyBtn    = MakeButton("Copy install commands");
-        var refreshBtn = MakeButton("Refresh status");
+        buttons.Location = new Point(8, 48);
+        _troubleshootBtn = MakeButton("Troubleshoot");
+        _troubleshootBtn.Click += (_, _) => OnTroubleshoot();
+        var copyBtn = MakeButton("Copy install commands");
         copyBtn.Click += (_, _) =>
         {
             try { Clipboard.SetText(PluginManager.FallbackCommands); } catch { }
-            SetPluginResult("Install commands copied — paste them into a Claude Code session.");
+            _bannerLabel.Text = "Install commands copied — paste them into a Claude Code session, then Troubleshoot.";
         };
-        refreshBtn.Click += async (_, _) => await RefreshPluginStatus();
-        diag.Controls.Add(copyBtn);
-        diag.Controls.Add(refreshBtn);
-        root.Controls.Add(diag);
+        buttons.Controls.Add(_troubleshootBtn);
+        buttons.Controls.Add(copyBtn);
+        banner.Controls.Add(buttons);
 
-        _pluginResultLabel = BodyText("");
-        _pluginResultLabel.Visible = false;
-        root.Controls.Add(_pluginResultLabel);
+        return banner;
     }
 
     private void BuildUsageSection(FlowLayoutPanel root)
     {
-        root.Controls.Add(SectionTitle("Usage limits"));
-
-        _usageCheck = new CheckBox
+        _usageToggle = MakeToggle();
+        _usageToggle.Checked = _settings.ShowUsage;
+        _usageToggle.CheckedChanged += (_, _) =>
         {
-            Text       = "Show usage limits in the overlay",
-            Checked    = _settings.ShowUsage,
-            AutoSize   = true,
-            ForeColor  = Fg,
-            FlatStyle  = FlatStyle.Flat,
-            Margin     = new Padding(0, 0, 0, 6),
+            UsageEnabledChanged?.Invoke(_usageToggle.Checked);
+            _usageRefreshBtn.Enabled = _usageToggle.Checked;
+            _usageBars.SetOn(_usageToggle.Checked);
         };
-        _usageCheck.CheckedChanged += (_, _) =>
-        {
-            UsageEnabledChanged?.Invoke(_usageCheck.Checked);
-            _usageRefreshBtn.Enabled = _usageCheck.Checked;
-            RenderUsage();
-        };
-        root.Controls.Add(_usageCheck);
+        root.Controls.Add(TitleRow("Usage limits", _usageToggle));
 
-        _usageInfoLabel = BodyText("");
-        root.Controls.Add(_usageInfoLabel);
+        root.Controls.Add(BodyText("Your account-wide 5-hour and weekly rate-limit usage."));
+
+        _usageBars = new UsageBarsControl { Width = ContentWidth, Margin = new Padding(0, 2, 0, 6) };
+        root.Controls.Add(_usageBars);
 
         var row = ButtonRow();
         _usageRefreshBtn = MakeButton("Refresh");
@@ -209,9 +220,9 @@ internal sealed class SettingsForm : Form
         {
             if (!_settings.ShowUsage) return;
             _usageRefreshBtn.Enabled = false;
-            _usageInfoLabel.Text = "Refreshing…";
             _usage = await _usageMonitor.FetchAsync();
-            RenderUsage();
+            if (IsDisposed) return;
+            _usageBars.SetUsage(_usage);
             _usageRefreshBtn.Enabled = _settings.ShowUsage;
         };
         row.Controls.Add(_usageRefreshBtn);
@@ -224,6 +235,7 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(BodyText($"Currently running v{AppInfo.Version}."));
 
         var row = ButtonRow();
+        row.Margin = new Padding(0, 0, 0, 24);  // breathing room at the bottom of the window
         var checkBtn = MakeButton("Check for Updates");
         checkBtn.Click += (_, _) => CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty);
         row.Controls.Add(checkBtn);
@@ -236,70 +248,80 @@ internal sealed class SettingsForm : Form
     {
         _usage = usage;
         if (!IsDisposed)
-            RenderUsage();
+            _usageBars.SetUsage(usage);
     }
 
-    // ── Plugin helpers ────────────────────────────────────────────────────────────
-    private async Task RefreshPluginStatus()
+    // ── Permission Mode logic ────────────────────────────────────────────────────
+    // On open: probe the plugin's real state, default the toggle from it (or from saved intent),
+    // and surface a banner if the user wants detection on but it isn't actually live.
+    private async Task InitPermissionStateAsync()
     {
-        _pluginStatusLabel.Text = "Status: checking…";
         var health = await _pluginManager.GetHealthAsync();
         if (IsDisposed) return;
-        _pluginStatusLabel.Text = "Status: " + PluginManager.Describe(health);
+
+        bool installed = health is PluginHealth.Healthy or PluginHealth.Disabled;
+        bool intent    = _settings.PermissionDetectionEnabled ?? installed;
+        _permToggle.SetCheckedSilently(intent);
+        ApplyHealth(health);
     }
 
-    private async Task RunPluginAction(Func<Task<(bool ok, string message)>> action)
+    private async void OnPermissionToggled(object? sender, EventArgs e)
     {
-        _pluginInstallBtn.Enabled   = false;
-        _pluginUninstallBtn.Enabled = false;
-        _pluginStatusLabel.Text     = "Status: working…";
+        bool intent = _permToggle.Checked;
+        _settings.PermissionDetectionEnabled = intent;
+        _settings.Save();
 
-        var (ok, message) = await action();
+        _permToggle.Enabled = false;
+        _bannerLabel.Text   = intent ? "Enabling detection…" : "Disabling detection…";
+        _banner.Visible     = true;
+
+        if (intent) await _pluginManager.InstallAsync();
+        else        await _pluginManager.UninstallAsync();
+
+        var health = await _pluginManager.GetHealthAsync();
         if (IsDisposed) return;
 
-        SetPluginResult(message, ok);
-        _pluginInstallBtn.Enabled   = true;
-        _pluginUninstallBtn.Enabled = true;
-        await RefreshPluginStatus();
+        _permToggle.Enabled = true;
+        ApplyHealth(health);
     }
 
-    private void SetPluginResult(string message, bool ok = true)
+    // Re-runs diagnosis: re-checks health and, unless the CLI is missing, attempts an
+    // (idempotent) reinstall to fix a partial/disabled state, then refreshes the banner.
+    private async void OnTroubleshoot()
     {
-        _pluginResultLabel.Text      = message;
-        _pluginResultLabel.ForeColor = ok ? Muted : Color.FromArgb(248, 113, 113);
-        _pluginResultLabel.Visible   = !string.IsNullOrEmpty(message);
-    }
+        _troubleshootBtn.Enabled = false;
+        _bannerLabel.Text        = "Diagnosing…";
 
-    // ── Usage helpers ──────────────────────────────────────────────────────────────
-    private void RenderUsage()
-    {
-        if (!_settings.ShowUsage)
+        var health = await _pluginManager.GetHealthAsync();
+        if (health == PluginHealth.CliMissing)
         {
-            _usageInfoLabel.Text = "Usage tracking is off. Enable it to see your 5-hour and weekly limits.";
+            if (IsDisposed) return;
+            _troubleshootBtn.Enabled = true;
+            _bannerLabel.Text =
+                "Claude CLI not found on PATH. Copy the install commands and run them in a Claude " +
+                "Code session, or make sure 'claude' is on your PATH, then Troubleshoot again.";
             return;
         }
 
-        if (_usage.LastUpdated == DateTime.MinValue && _usage.FiveHourPercent == null)
-        {
-            _usageInfoLabel.Text = _usage.Error ?? "No usage data yet.";
-            return;
-        }
+        await _pluginManager.InstallAsync();
+        health = await _pluginManager.GetHealthAsync();
+        if (IsDisposed) return;
 
-        string session = FormatWindow("Session (5h)", _usage.FiveHourPercent, _usage.FiveHourResetsAt);
-        string weekly  = FormatWindow("Weekly",       _usage.SevenDayPercent, _usage.SevenDayResetsAt);
-
-        string footer = _usage.Ok
-            ? $"Updated {_usage.LastUpdated:h:mm tt}"
-            : $"Stale — {_usage.Error}";
-
-        _usageInfoLabel.Text = $"{session}\n{weekly}\n{footer}";
+        _troubleshootBtn.Enabled = true;
+        ApplyHealth(health);
+        if (health != PluginHealth.Healthy)
+            _bannerLabel.Text =
+                "Still not active: " + PluginManager.Describe(health) +
+                ". Restart any open Claude Code sessions and Troubleshoot again.";
     }
 
-    private static string FormatWindow(string label, double? percent, DateTime? resetsAt)
+    // Shows/hides the warning banner based on the user's intent vs. the plugin's real health.
+    private void ApplyHealth(PluginHealth health)
     {
-        string pct   = percent is { } p ? $"{(int)Math.Round(Math.Clamp(p, 0, 100))}%" : "—";
-        string reset = resetsAt is { } r ? $"  ·  resets {r:ddd h:mm tt}" : "";
-        return $"{label}: {pct}{reset}";
+        bool issue = _permToggle.Checked && health != PluginHealth.Healthy;
+        _banner.Visible = issue;
+        if (issue)
+            _bannerLabel.Text = "Detection is enabled but not active: " + PluginManager.Describe(health) + ".";
     }
 
     // ── Control factories ───────────────────────────────────────────────────────────
@@ -307,17 +329,43 @@ internal sealed class SettingsForm : Form
     {
         Text      = text,
         AutoSize  = true,
-        ForeColor = Color.FromArgb(245, 245, 250),
+        ForeColor = Theme.Title,
         Font      = new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point),
         Margin    = new Padding(0, 4, 0, 8),
     };
+
+    // A section header with a right-justified toggle on the same row.
+    private Panel TitleRow(string title, ToggleSwitch toggle)
+    {
+        var row = new Panel
+        {
+            Width  = ContentWidth,
+            Height = 30,
+            Margin = new Padding(0, 4, 0, 8),
+        };
+        var label = new Label
+        {
+            Text      = title,
+            AutoSize  = true,
+            ForeColor = Theme.Title,
+            Font      = new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point),
+            Location  = new Point(0, 2),
+        };
+        toggle.Location = new Point(ContentWidth - toggle.Width, (row.Height - toggle.Height) / 2);
+        toggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+        row.Controls.Add(label);
+        row.Controls.Add(toggle);
+        return row;
+    }
+
+    private static ToggleSwitch MakeToggle() => new() { Margin = new Padding(0) };
 
     private static Label BodyText(string text) => new()
     {
         Text        = text,
         AutoSize    = true,
         MaximumSize = new Size(ContentWidth, 0),  // wrap long lines, auto height
-        ForeColor   = Muted,
+        ForeColor   = Theme.Muted,
         Margin      = new Padding(0, 0, 0, 6),
     };
 
@@ -325,14 +373,14 @@ internal sealed class SettingsForm : Form
     {
         var link = new LinkLabel
         {
-            Text              = text,
-            AutoSize          = true,
-            LinkColor         = Accent,
-            ActiveLinkColor   = Color.FromArgb(147, 197, 253),
-            VisitedLinkColor  = Accent,
-            LinkBehavior      = LinkBehavior.HoverUnderline,
-            BackColor         = FormBg,
-            Margin            = new Padding(0, 0, 0, 4),
+            Text             = text,
+            AutoSize         = true,
+            LinkColor        = Theme.Accent,
+            ActiveLinkColor  = Theme.AccentHover,
+            VisitedLinkColor = Theme.Accent,
+            LinkBehavior     = LinkBehavior.HoverUnderline,
+            BackColor        = Theme.FormBg,
+            Margin           = new Padding(0, 0, 0, 4),
         };
         link.LinkClicked += (_, _) => OpenUrl(url);
         return link;
@@ -342,7 +390,7 @@ internal sealed class SettingsForm : Form
     {
         Height    = 1,
         Width     = ContentWidth,
-        BackColor = BorderCol,
+        BackColor = Theme.Border,
         Margin    = new Padding(0, 12, 0, 12),
     };
 
@@ -362,15 +410,15 @@ internal sealed class SettingsForm : Form
             Text      = text,
             AutoSize  = true,
             FlatStyle = FlatStyle.Flat,
-            ForeColor = Fg,
-            BackColor = ButtonBg,
+            ForeColor = Theme.Fg,
+            BackColor = Theme.ButtonBg,
             Padding   = new Padding(8, 4, 8, 4),
             Margin    = new Padding(0, 0, 8, 0),
             UseVisualStyleBackColor = false,
         };
-        b.FlatAppearance.BorderColor       = BorderCol;
-        b.FlatAppearance.MouseOverBackColor = ButtonHover;
-        b.FlatAppearance.MouseDownBackColor = BorderCol;
+        b.FlatAppearance.BorderColor        = Theme.Border;
+        b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
+        b.FlatAppearance.MouseDownBackColor = Theme.Border;
         return b;
     }
 
