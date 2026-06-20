@@ -21,7 +21,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon;
     private readonly AppSettings _settings;
     private readonly PluginManager _pluginManager = new();
-    private ToolStripMenuItem _permissionStatusItem = null!;
+
+    // The settings window, lazily created on first open and reused while it stays open.
+    private SettingsForm? _settingsForm;
+
+    // Most recent usage reading, so a freshly-opened settings window can show it without waiting
+    // for the next poll. Empty until the first successful (or attempted) fetch.
+    private UsageInfo _lastUsage = UsageInfo.Empty;
 
     // PID of the session whose notification was last shown, so a balloon click
     // can focus the right terminal.
@@ -42,27 +48,23 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             Text    = "Claude Watch",
             Icon    = LoadEmbeddedIcon("ClaudeWatch.icon.png"),
         };
-        _notifyIcon.DoubleClick += (_, _) => { _overlay.BringToFront(); _overlay.TopMost = true; };
+        // Left-click opens the first-class settings window; right-click shows the slim menu below.
+        _notifyIcon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenSettings(); };
         _notifyIcon.BalloonTipClicked += OnBalloonTipClicked;
 
         var trayMenu = new ContextMenuStrip();
-        var showItem = new ToolStripMenuItem("Show Overlay");
-        showItem.Click += (_, _) => { _overlay.BringToFront(); _overlay.TopMost = true; };
+
+        var header = new ToolStripMenuItem($"Claude Watch — v{AppInfo.Version}") { Enabled = false };
+        var settingsItem = new ToolStripMenuItem("Settings…");
+        settingsItem.Click += (_, _) => OpenSettings();
+        var updateItem = new ToolStripMenuItem("Check for Updates…");
+        updateItem.Click += (_, _) => CheckForUpdates();
         var exitItem = new ToolStripMenuItem("Exit Claude Watch");
         exitItem.Click += (_, _) => Exit();
-        var updateItem = new ToolStripMenuItem("Check for Updates...");
-        updateItem.Click += (_, _) => CheckForUpdates();
 
-        var usageItem = new ToolStripMenuItem("Show usage limits")
-        {
-            Checked      = _settings.ShowUsage,
-            CheckOnClick = true,
-        };
-        usageItem.CheckedChanged += OnUsageToggled;
-
-        trayMenu.Items.Add(showItem);
-        trayMenu.Items.Add(usageItem);
-        trayMenu.Items.Add(BuildPermissionMenu());
+        trayMenu.Items.Add(header);
+        trayMenu.Items.Add(new ToolStripSeparator());
+        trayMenu.Items.Add(settingsItem);
         trayMenu.Items.Add(updateItem);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
@@ -101,18 +103,38 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         }
     }
 
+    // Opens (or re-focuses) the settings window, wiring it to the shared state and callbacks.
+    private void OpenSettings()
+    {
+        if (_settingsForm is { IsDisposed: false })
+        {
+            if (_settingsForm.WindowState == FormWindowState.Minimized)
+                _settingsForm.WindowState = FormWindowState.Normal;
+            _settingsForm.Activate();
+            _settingsForm.BringToFront();
+            return;
+        }
+
+        _settingsForm = new SettingsForm(_settings, _pluginManager, _usageMonitor, _lastUsage);
+        _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
+        _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
+        _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
+        _settingsForm.Show();
+        _settingsForm.Activate();
+    }
+
     // Toggles the usage bars. Disabling stops all polling so no OAuth query ever goes out;
     // enabling kicks off an immediate refresh and resumes the timer.
-    private void OnUsageToggled(object? sender, EventArgs e)
+    private void SetUsageEnabled(bool enabled)
     {
-        if (sender is not ToolStripMenuItem item || _settings.ShowUsage == item.Checked)
+        if (_settings.ShowUsage == enabled)
             return;
 
-        _settings.ShowUsage = item.Checked;
+        _settings.ShowUsage = enabled;
         _settings.Save();
-        _overlay.SetUsageEnabled(_settings.ShowUsage);
+        _overlay.SetUsageEnabled(enabled);
 
-        if (_settings.ShowUsage)
+        if (enabled)
         {
             _usageTimer.Start();
             RefreshUsage();
@@ -123,73 +145,25 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         }
     }
 
-    // Fetches usage off the UI thread, then pushes the result back onto it for rendering.
+    // Fetches usage off the UI thread, then pushes the result back onto it for rendering in both
+    // the overlay and (if open) the settings window. Caches the latest reading for new windows.
     private async void RefreshUsage()
     {
         if (!_settings.ShowUsage) return;
         var info = await _usageMonitor.FetchAsync();
+        _lastUsage = info;
         try
         {
             if (_overlay.IsHandleCreated && !_overlay.IsDisposed)
-                _overlay.BeginInvoke((Action)(() => _overlay.UpdateUsage(info)));
+                _overlay.BeginInvoke((Action)(() =>
+                {
+                    _overlay.UpdateUsage(info);
+                    if (_settingsForm is { IsDisposed: false })
+                        _settingsForm.UpdateUsage(info);
+                }));
         }
         catch (ObjectDisposedException) { }
         catch (InvalidOperationException) { }
-    }
-
-    // Submenu that lets the user install/remove the permission-monitor plugin, which feeds
-    // live {session_id}.mode files to SessionMonitor. Health is refreshed each time it opens.
-    private ToolStripMenuItem BuildPermissionMenu()
-    {
-        var menu = new ToolStripMenuItem("Permission detection");
-
-        _permissionStatusItem = new ToolStripMenuItem("Status: checking…") { Enabled = false };
-
-        var installItem = new ToolStripMenuItem("Install / enable detection");
-        installItem.Click += async (_, _) => await RunPluginAction(_pluginManager.InstallAsync, "Permission detection");
-
-        var uninstallItem = new ToolStripMenuItem("Uninstall detection");
-        uninstallItem.Click += async (_, _) => await RunPluginAction(_pluginManager.UninstallAsync, "Permission detection");
-
-        var copyItem = new ToolStripMenuItem("Copy install commands");
-        copyItem.Click += (_, _) =>
-        {
-            try { Clipboard.SetText(PluginManager.FallbackCommands); } catch { }
-            ShowBalloon("Claude Watch", "Install commands copied — paste them into a Claude Code session.", ToolTipIcon.Info);
-        };
-
-        menu.DropDownItems.Add(_permissionStatusItem);
-        menu.DropDownItems.Add(new ToolStripSeparator());
-        menu.DropDownItems.Add(installItem);
-        menu.DropDownItems.Add(uninstallItem);
-        menu.DropDownItems.Add(new ToolStripSeparator());
-        menu.DropDownItems.Add(copyItem);
-
-        menu.DropDownOpening += async (_, _) => await RefreshPermissionStatus();
-        return menu;
-    }
-
-    private async Task RefreshPermissionStatus()
-    {
-        var health = await _pluginManager.GetHealthAsync();
-        _permissionStatusItem.Text = "Status: " + PluginManager.Describe(health);
-    }
-
-    private async Task RunPluginAction(Func<Task<(bool ok, string message)>> action, string title)
-    {
-        _lastNotifiedPid = null; // not session-tied; don't let a balloon click focus a stale terminal
-        _permissionStatusItem.Text = "Status: working…";
-        var (ok, message) = await action();
-        ShowBalloon($"Claude Watch — {title}", message, ok ? ToolTipIcon.Info : ToolTipIcon.Error);
-        await RefreshPermissionStatus();
-    }
-
-    private void ShowBalloon(string title, string text, ToolTipIcon icon)
-    {
-        _notifyIcon.BalloonTipTitle = title;
-        _notifyIcon.BalloonTipText  = text;
-        _notifyIcon.BalloonTipIcon  = icon;
-        _notifyIcon.ShowBalloonTip(6000);
     }
 
     private void OnSessionsChanged(IReadOnlyList<ClaudeSession> sessions)
@@ -334,6 +308,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _deadlineTimer.Stop();
         _usageTimer.Stop();
         _notifyIcon.Visible = false;
+        if (_settingsForm is { IsDisposed: false })
+            _settingsForm.Close();
         _overlay.Close();
     }
 
@@ -347,6 +323,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _monitor.Dispose();
             _notifyIcon.Icon?.Dispose();
             _notifyIcon.Dispose();
+            _settingsForm?.Dispose();
             _overlay.Dispose();
         }
         base.Dispose(disposing);

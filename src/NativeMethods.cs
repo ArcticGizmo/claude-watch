@@ -10,6 +10,22 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DestroyIcon(IntPtr hIcon);
 
+    // ── Dark title bar ─────────────────────────────────────────────────────────
+    // Opts a window's non-client area (title bar, border) into the system dark theme so a
+    // WinForms form matches the app's dark content. Best-effort: silently no-ops on builds
+    // that don't support the attribute.
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
+    internal static void UseDarkTitleBar(IntPtr hwnd)
+    {
+        int enabled = 1;
+        // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE on Win10 20H1+/Win11; 19 on earlier 20xx builds.
+        if (DwmSetWindowAttribute(hwnd, 20, ref enabled, sizeof(int)) != 0)
+            DwmSetWindowAttribute(hwnd, 19, ref enabled, sizeof(int));
+    }
+
     // ── Global hot key ───────────────────────────────────────────────────────
     // System-wide hotkey registration: Windows posts WM_HOTKEY to the registering window
     // regardless of which application currently has focus.
