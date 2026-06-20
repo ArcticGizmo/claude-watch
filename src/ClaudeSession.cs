@@ -36,7 +36,8 @@ public record ClaudeSession(
     string ProjectName,
     DateTime LastUpdated,
     PermissionMode Mode = PermissionMode.Normal,
-    IReadOnlyList<SubAgent>? SubAgents = null
+    IReadOnlyList<SubAgent>? SubAgents = null,
+    string? Activity = null
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>

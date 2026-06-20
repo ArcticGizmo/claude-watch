@@ -14,7 +14,7 @@ internal sealed class OverlayForm : Form
     // ── Layout ────────────────────────────────────────────────────────────────
     private const int FormWidth     = 280;
     private const int CompactHeight = 44;
-    private const int RowHeight     = 30;
+    private const int RowHeight     = 46;
     private const int SubRowHeight  = 24;
     private const int SubIndent     = 22;
     private const int HorizPad      = 12;
@@ -318,6 +318,12 @@ internal sealed class OverlayForm : Form
             g.FillRectangle(hoverBrush, 1, top + 1, ClientSize.Width - 2, RowHeight - 1);
         }
 
+        // A running session with a parsed tool call gets a second, dimmer activity line; without
+        // one the project name stays vertically centred as before.
+        var activity   = session.Status == SessionStatus.Running ? session.Activity : null;
+        bool twoLine   = !string.IsNullOrEmpty(activity);
+        int nameMidY   = twoLine ? top + RowHeight / 2 - 8 : midY;
+
         var dotColor = session.Status switch
         {
             SessionStatus.Running        => RunningColor,
@@ -327,10 +333,11 @@ internal sealed class OverlayForm : Form
         };
 
         using var dotBrush = new SolidBrush(dotColor);
-        g.FillEllipse(dotBrush, HorizPad, midY - 4, 8, 8);
+        g.FillEllipse(dotBrush, HorizPad, nameMidY - 4, 8, 8);
 
-        using var nameFont   = new Font("Segoe UI", 8.5f, GraphicsUnit.Point);
-        using var statusFont = new Font("Segoe UI", 7.5f, GraphicsUnit.Point);
+        using var nameFont     = new Font("Segoe UI", 8.5f, GraphicsUnit.Point);
+        using var statusFont   = new Font("Segoe UI", 7.5f, GraphicsUnit.Point);
+        using var activityFont = new Font("Segoe UI", 7.5f, GraphicsUnit.Point);
         using var fgBrush      = new SolidBrush(FgColor);
         using var mutedBrush   = new SolidBrush(MutedColor);
         using var attnBrush    = new SolidBrush(AttentionColor);
@@ -358,14 +365,24 @@ internal sealed class OverlayForm : Form
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
         g.DrawString(nameTrunc, nameFont, fgBrush,
-            HorizPad + 14, midY - nameSz.Height / 2);
+            HorizPad + 14, nameMidY - nameSz.Height / 2);
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
-            statusX, midY - statusSz.Height / 2);
+            statusX, nameMidY - statusSz.Height / 2);
 
         if (session.Mode != PermissionMode.Normal)
-            DrawModeBadge(g, session.Mode, statusX - badgeWidth, midY);
+            DrawModeBadge(g, session.Mode, statusX - badgeWidth, nameMidY);
+
+        if (twoLine)
+        {
+            int activityMidY  = top + RowHeight / 2 + 9;
+            int activityMaxW  = ClientSize.Width - (HorizPad + 14) - HorizPad;
+            var activityTrunc = TruncateString(g, activity!, activityFont, activityMaxW);
+            var activitySz    = g.MeasureString(activityTrunc, activityFont);
+            g.DrawString(activityTrunc, activityFont, mutedBrush,
+                HorizPad + 14, activityMidY - activitySz.Height / 2);
+        }
     }
 
     private static Color ModeColor(PermissionMode mode) => mode switch

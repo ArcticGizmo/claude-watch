@@ -42,15 +42,15 @@ URL, free, no keys, has iOS/Android apps.
 
 Show each running session's most recent tool call ("Reading X", "Running: npm test", "Editing Y").
 
-- [ ] New `src/TranscriptReader.cs` — `GetActivity(sessionId, cwd)`: locate transcript, read only the
+- [x] New `src/TranscriptReader.cs` — `GetActivity(sessionId, cwd)`: locate transcript, read only the
       **tail** (~32 KB seek, `FileShare.ReadWrite`), parse from the end for the latest `tool_use`,
       map `(toolName, input)` → friendly phrase; return `null` on any failure; never read whole file.
-- [ ] `src/ClaudeSession.cs` — add optional `string? Activity = null` (last param; keeps call sites
+- [x] `src/ClaudeSession.cs` — add optional `string? Activity = null` (last param; keeps call sites
       compiling).
-- [ ] `src/SessionMonitor.cs` `ReadSession` — only when `status == Running`, populate `Activity`.
-- [ ] `src/OverlayForm.cs` `DrawRow` (`:222`) — dim second line under project name; bump `RowHeight`
-      or truncate via existing `TruncateString` (`:313`).
-- [ ] `src/IndicatorTooltipForm.cs` — add activity line to hover tooltip.
+- [x] `src/SessionMonitor.cs` `ReadSession` — only when `status == Running`, populate `Activity`.
+- [x] `src/OverlayForm.cs` `DrawRow` — dim second line under project name; `RowHeight` bumped
+      30→46 for the activity phrase. (`FormWidth` kept at 280 — activity truncates to fit.)
+- [x] `src/IndicatorTooltipForm.cs` — add activity line to hover tooltip.
 
 ## Feature 3 — Token & cost tracking
 

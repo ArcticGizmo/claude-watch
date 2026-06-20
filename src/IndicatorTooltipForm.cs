@@ -16,11 +16,13 @@ internal sealed class IndicatorTooltipForm : Form
     private static readonly Color AttnColor      = Color.FromArgb(251, 146, 60);
     private static readonly Color AwaitingColor  = Color.FromArgb(250, 204, 21);
     private static readonly Color IdleColor      = Color.FromArgb(100, 116, 139);
+    private static readonly Color MutedColor     = Color.FromArgb(150, 150, 170);
 
     private string         _projectName = "";
     private string         _statusText  = "";
     private Color          _statusColor = IdleColor;
     private PermissionMode _mode        = PermissionMode.Normal;
+    private string?        _activity;
 
     public IndicatorTooltipForm()
     {
@@ -51,6 +53,7 @@ internal sealed class IndicatorTooltipForm : Form
     {
         _projectName = session.ProjectName;
         _mode        = session.Mode;
+        _activity    = session.Status == SessionStatus.Running ? session.Activity : null;
         (_statusText, _statusColor) = session.Status switch
         {
             SessionStatus.Running        => ("running",          RunningColor),
@@ -59,16 +62,24 @@ internal sealed class IndicatorTooltipForm : Form
             _                            => ("idle",             IdleColor),
         };
 
-        using var nameFont   = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        using var statusFont = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
-        using var modeFont   = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
-        using var g          = CreateGraphics();
+        using var nameFont     = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        using var statusFont   = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var modeFont     = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var activityFont = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var g            = CreateGraphics();
 
         var nameSz   = g.MeasureString(_projectName, nameFont);
         var statusSz = g.MeasureString(_statusText,  statusFont);
 
         float contentWidth = Math.Max(nameSz.Width, statusSz.Width);
         int h = (int)nameSz.Height + (int)statusSz.Height + VertPad * 2 + 4;
+
+        if (!string.IsNullOrEmpty(_activity))
+        {
+            var activitySz = g.MeasureString(_activity, activityFont);
+            contentWidth   = Math.Max(contentWidth, activitySz.Width);
+            h             += (int)activitySz.Height + 2;
+        }
 
         if (_mode != PermissionMode.Normal)
         {
@@ -102,20 +113,30 @@ internal sealed class IndicatorTooltipForm : Form
         using (var pen = new Pen(BorderColor, 1.5f))
             g.DrawPath(pen, path);
 
-        using var nameFont    = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        using var statusFont  = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
-        using var modeFont    = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
-        using var fgBrush     = new SolidBrush(FgColor);
-        using var statusBrush = new SolidBrush(_statusColor);
+        using var nameFont     = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        using var statusFont   = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var modeFont     = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var activityFont = new Font("Segoe UI", 8f, FontStyle.Regular, GraphicsUnit.Point);
+        using var fgBrush      = new SolidBrush(FgColor);
+        using var statusBrush  = new SolidBrush(_statusColor);
+        using var mutedBrush   = new SolidBrush(MutedColor);
 
         var nameSz   = g.MeasureString(_projectName, nameFont);
         var statusSz = g.MeasureString(_statusText,  statusFont);
         g.DrawString(_projectName, nameFont,   fgBrush,     HorizPad, VertPad);
         g.DrawString(_statusText,  statusFont, statusBrush, HorizPad, VertPad + nameSz.Height + 2);
 
+        float nextY = VertPad + nameSz.Height + 2 + statusSz.Height + 4;
+
+        if (!string.IsNullOrEmpty(_activity))
+        {
+            g.DrawString(_activity, activityFont, mutedBrush, HorizPad, nextY);
+            nextY += g.MeasureString(_activity, activityFont).Height + 2;
+        }
+
         if (_mode != PermissionMode.Normal)
         {
-            float modeY   = VertPad + nameSz.Height + 2 + statusSz.Height + 4;
+            float modeY   = nextY;
             var modeColor = ModeColor(_mode);
             using var modeBrush = new SolidBrush(modeColor);
             DrawModeBadge(g, _mode, HorizPad, (int)(modeY + modeFont.GetHeight(g) / 2));

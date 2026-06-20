@@ -22,6 +22,7 @@ internal sealed class SessionMonitor : IDisposable
     private readonly HashSet<string> _hadRunningSubs = new();
 
     private readonly SubAgentReader _subAgents = new();
+    private readonly TranscriptReader _transcripts = new();
 
     // PIDs we have an exit subscription for, keyed by the same string PID used everywhere else.
     private readonly Dictionary<string, Process> _trackedProcesses = new();
@@ -229,6 +230,11 @@ internal sealed class SessionMonitor : IDisposable
 
             var mode = ReadPermissionMode(Path.Combine(_sessionsDir, $"{sessionId}.mode"));
 
+            // Live activity: only worth reading the transcript tail while the session is working.
+            var activity = status == SessionStatus.Running
+                ? _transcripts.GetActivity(sessionId, cwd)
+                : null;
+
             var session = new ClaudeSession(
                 pid,
                 sessionId,
@@ -237,7 +243,8 @@ internal sealed class SessionMonitor : IDisposable
                 projectName,
                 updatedAt,
                 mode,
-                subAgents
+                subAgents,
+                activity
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))
