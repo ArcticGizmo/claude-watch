@@ -15,6 +15,8 @@ internal sealed class OverlayForm : Form
     private const int FormWidth     = 280;
     private const int CompactHeight = 44;
     private const int RowHeight     = 30;
+    private const int SubRowHeight  = 24;
+    private const int SubIndent     = 22;
     private const int HorizPad      = 12;
     private const int Corner        = 10;
 
@@ -30,10 +32,19 @@ internal sealed class OverlayForm : Form
     private static readonly Color MutedColor     = Color.FromArgb(110, 110, 130);
     private static readonly Color SepColor       = Color.FromArgb(35,  35,  50);
     private static readonly Color RowHoverColor  = Color.FromArgb(25,  25,  38);
+    private static readonly Color SubAgentColor  = Color.FromArgb(56,  189, 248);
+    private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
 
     // ── State ─────────────────────────────────────────────────────────────────
-    private IReadOnlyList<ClaudeSession> _sessions       = [];
-    private IReadOnlyList<ClaudeSession> _sortedSessions = [];
+    // A flat render list of parent-session rows interleaved with their running sub-agent
+    // child rows, in draw order. Built from the sessions on each update.
+    private readonly record struct DisplayRow(ClaudeSession Session, SubAgent? Sub)
+    {
+        public bool IsSubAgent => Sub != null;
+    }
+
+    private IReadOnlyList<ClaudeSession> _sessions = [];
+    private List<DisplayRow> _rows = [];
     private bool  _expanded;
     private bool  _dragging;
     private Point _dragStartScreen;
@@ -82,12 +93,19 @@ internal sealed class OverlayForm : Form
     // ── Public API ────────────────────────────────────────────────────────────
     public void UpdateSessions(IReadOnlyList<ClaudeSession> sessions)
     {
-        _sessions       = sessions;
-        _sortedSessions = [.. sessions
-            .OrderBy(s => s.ProjectName, StringComparer.OrdinalIgnoreCase)];
+        _sessions = sessions;
+
+        var rows = new List<DisplayRow>();
+        foreach (var session in sessions.OrderBy(s => s.ProjectName, StringComparer.OrdinalIgnoreCase))
+        {
+            rows.Add(new DisplayRow(session, null));
+            foreach (var sub in session.SubAgents)
+                rows.Add(new DisplayRow(session, sub));
+        }
+        _rows = rows;
 
         // Auto-collapse when all sessions disappear
-        if (_sortedSessions.Count == 0)
+        if (sessions.Count == 0)
             _expanded = false;
 
         // Stop flashing if nothing needs attention anymore
@@ -105,7 +123,7 @@ internal sealed class OverlayForm : Form
     public void TriggerAttention()
     {
         // Auto-expand so the user can see which project needs attention
-        if (!_expanded && _sortedSessions.Count > 0)
+        if (!_expanded && _rows.Count > 0)
         {
             _expanded = true;
             UpdateHeight();
@@ -119,11 +137,27 @@ internal sealed class OverlayForm : Form
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
+    // Pixel height of a single render row (sub-agent rows are shorter than session rows).
+    private static int HeightOf(DisplayRow row) => row.IsSubAgent ? SubRowHeight : RowHeight;
+
+    // Y offset (from the top of the form) of the row at the given index.
+    private int RowTop(int index)
+    {
+        int top = CompactHeight;
+        for (int i = 0; i < index; i++)
+            top += HeightOf(_rows[i]);
+        return top;
+    }
+
     private void UpdateHeight()
     {
         int h = CompactHeight;
-        if (_expanded && _sortedSessions.Count > 0)
-            h += _sortedSessions.Count * RowHeight + 2;
+        if (_expanded && _rows.Count > 0)
+        {
+            foreach (var row in _rows)
+                h += HeightOf(row);
+            h += 2;
+        }
 
         if (ClientSize.Height != h)
             ClientSize = new Size(FormWidth, h);
@@ -149,7 +183,7 @@ internal sealed class OverlayForm : Form
         DrawHeader(g);
 
         if (_expanded)
-            for (int i = 0; i < _sortedSessions.Count; i++)
+            for (int i = 0; i < _rows.Count; i++)
                 DrawRow(g, i);
     }
 
@@ -221,8 +255,58 @@ internal sealed class OverlayForm : Form
 
     private void DrawRow(Graphics g, int rowIdx)
     {
-        var session = _sortedSessions[rowIdx];
-        int top     = CompactHeight + rowIdx * RowHeight;
+        if (_rows[rowIdx].IsSubAgent)
+            DrawSubAgentRow(g, rowIdx);
+        else
+            DrawSessionRow(g, rowIdx);
+    }
+
+    private void DrawSubAgentRow(Graphics g, int rowIdx)
+    {
+        var sub  = _rows[rowIdx].Sub!;
+        int top  = RowTop(rowIdx);
+        int midY = top + SubRowHeight / 2;
+
+        if (rowIdx == _hoveredRow)
+        {
+            using var hoverBrush = new SolidBrush(RowHoverColor);
+            g.FillRectangle(hoverBrush, 1, top, ClientSize.Width - 2, SubRowHeight);
+        }
+
+        // Tree connector: a stub dropping from the parent row down to this child's dot.
+        int branchX = HorizPad + 4;            // aligns under the parent status dot
+        int dotX    = HorizPad + SubIndent;
+        using (var treePen = new Pen(TreeLineColor, 1f))
+        {
+            g.DrawLine(treePen, branchX, top - SubRowHeight / 2, branchX, midY);
+            g.DrawLine(treePen, branchX, midY, dotX - 2, midY);
+        }
+
+        using var dotBrush = new SolidBrush(SubAgentColor);
+        g.FillEllipse(dotBrush, dotX, midY - 3, 6, 6);
+
+        using var nameFont   = new Font("Segoe UI", 8f, GraphicsUnit.Point);
+        using var statusFont = new Font("Segoe UI", 7f, GraphicsUnit.Point);
+        using var fgBrush    = new SolidBrush(FgColor);
+        using var subBrush   = new SolidBrush(SubAgentColor);
+
+        const string statusText = "running";
+        var statusSz   = g.MeasureString(statusText, statusFont);
+        int labelX     = dotX + 12;
+        int labelMaxW  = ClientSize.Width - labelX - HorizPad - (int)statusSz.Width - 6;
+        var labelTrunc = TruncateString(g, sub.Description, nameFont, labelMaxW);
+        var labelSz    = g.MeasureString(labelTrunc, nameFont);
+
+        g.DrawString(labelTrunc, nameFont, fgBrush, labelX, midY - labelSz.Height / 2);
+
+        int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
+        g.DrawString(statusText, statusFont, subBrush, statusX, midY - statusSz.Height / 2);
+    }
+
+    private void DrawSessionRow(Graphics g, int rowIdx)
+    {
+        var session = _rows[rowIdx].Session;
+        int top     = RowTop(rowIdx);
         int midY    = top + RowHeight / 2;
 
         using var sepPen = new Pen(SepColor, 1f);
@@ -377,7 +461,9 @@ internal sealed class OverlayForm : Form
             int row = HitTestRow(e.Location);
             if (row >= 0)
             {
-                var pid = _sortedSessions[row].Pid;
+                // Sub-agent rows resolve to their parent session — the sub-agent runs in the
+                // parent's process, so focusing means focusing the parent terminal.
+                var pid = _rows[row].Session.Pid;
                 SessionFocused?.Invoke(pid);
                 if (int.TryParse(pid, out int pidInt))
                     NativeMethods.FocusTerminalForProcess(pidInt);
@@ -405,8 +491,15 @@ internal sealed class OverlayForm : Form
     private int HitTestRow(Point p)
     {
         if (!_expanded || p.Y < CompactHeight) return -1;
-        int idx = (p.Y - CompactHeight) / RowHeight;
-        return idx >= 0 && idx < _sortedSessions.Count ? idx : -1;
+        int y = CompactHeight;
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            int h = HeightOf(_rows[i]);
+            if (p.Y >= y && p.Y < y + h)
+                return i;
+            y += h;
+        }
+        return -1;
     }
 
     // ── Context menu ─────────────────────────────────────────────────────────
