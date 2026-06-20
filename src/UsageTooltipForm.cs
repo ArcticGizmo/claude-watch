@@ -6,7 +6,7 @@ namespace ClaudeWatch;
 /// <summary>
 /// Small borderless popup shown when the cursor dwells over the usage bars. Lists the 5-hour
 /// ("session") and 7-day ("weekly") percentages with their reset times, plus — when the data is
-/// dimmed — the reason it couldn't be refreshed. Mirrors <see cref="IndicatorTooltipForm"/>.
+/// dimmed — the reason it couldn't be refreshed.
 /// </summary>
 internal sealed class UsageTooltipForm : Form
 {

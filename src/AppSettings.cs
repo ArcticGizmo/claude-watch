@@ -8,8 +8,6 @@ internal sealed class AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "ClaudeWatch", "settings.json");
 
-    public string DisplayStyle { get; set; } = "Ducks";
-
     // Whether to show (and fetch, via the OAuth /usage endpoint) the session/weekly usage bars.
     // Defaults to true; a missing key in an older settings file keeps this default.
     public bool ShowUsage { get; set; } = true;

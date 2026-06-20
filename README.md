@@ -1,16 +1,16 @@
-# <img src="./src/sprites/icon.png" /> Claude Watch 
+# <img src="./src/icon.png" /> Claude Watch 
 
 A Windows system tray app that monitors active Claude Code sessions and displays their status as desktop overlays.
 
 ## What it does
 
-Claude Watch reads session files from `~/.claude/sessions/` every 3 seconds and shows a floating indicator for each active session. The indicator reflects the current state:
+Claude Watch reads session files from `~/.claude/sessions/` every 3 seconds and shows a single floating overlay panel listing every active session and its current state:
 
 - **Idle** — session is waiting for input
 - **Running** — session is actively executing
 - **Needs Attention** — session finished recently and is waiting for you (shows a balloon notification)
 
-Right-click the tray icon to switch between display styles (Ducks, Cats, Squares, Wolfenstein).
+Click the overlay header to expand it into per-session rows; click a row to focus that session's terminal. Drag the header to reposition it.
 
 ## Installing
 

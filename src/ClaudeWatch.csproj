@@ -9,27 +9,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>ClaudeWatch</RootNamespace>
     <AssemblyName>ClaudeWatch</AssemblyName>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <None Include="icon.ico" />
-    <EmbeddedResource Include="sprites\icon.png" />
-    <EmbeddedResource Include="sprites\duck-sleep.png" />
-    <EmbeddedResource Include="sprites\duck-working.png" />
-    <EmbeddedResource Include="sprites\duck-alert.png" />
-    <EmbeddedResource Include="sprites\cat-sleep.png" />
-    <EmbeddedResource Include="sprites\cat-working.png" />
-    <EmbeddedResource Include="sprites\cat-alert.png" />
-    <EmbeddedResource Include="sprites\square-sleep.png" />
-    <EmbeddedResource Include="sprites\square-working.png" />
-    <EmbeddedResource Include="sprites\square-alert.png" />
-    <EmbeddedResource Include="sprites\wolfenstein-sleep.png" />
-    <EmbeddedResource Include="sprites\wolfenstein-working.png" />
-    <EmbeddedResource Include="sprites\wolfenstein-alert.png" />
-    <EmbeddedResource Include="sprites\wolfenstein-working-accept-edits.png" />
-    <EmbeddedResource Include="sprites\wolfenstein-working-plan-mode.png" />
-    <EmbeddedResource Include="sprites\wolfenstein-working-auto.png" />
-    <EmbeddedResource Include="sprites\wolfenstein-working-bypass.png" />
+    <EmbeddedResource Include="icon.png" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Velopack" Version="1.2.0" />
