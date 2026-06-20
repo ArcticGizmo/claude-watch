@@ -26,6 +26,33 @@ internal static class NativeMethods
             DwmSetWindowAttribute(hwnd, 19, ref enabled, sizeof(int));
     }
 
+    // ── Dark scrollbars ────────────────────────────────────────────────────────
+    // Opting the app into dark mode (uxtheme ordinal #135) then applying the explorer dark
+    // theme to a scrolling control gives it the dark non-client scrollbar instead of the
+    // default light one. Best-effort: unsupported on builds older than Win10 1809.
+
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetWindowTheme(IntPtr hWnd, string? pszSubAppName, string? pszSubIdList);
+
+    [DllImport("uxtheme.dll", EntryPoint = "#135", SetLastError = true)]
+    private static extern int SetPreferredAppMode(int appMode);
+
+    private static bool _darkAppModeSet;
+
+    internal static void UseDarkScrollBars(IntPtr hWnd)
+    {
+        try
+        {
+            if (!_darkAppModeSet)
+            {
+                SetPreferredAppMode(1); // PreferredAppMode.AllowDark
+                _darkAppModeSet = true;
+            }
+            SetWindowTheme(hWnd, "DarkMode_Explorer", null);
+        }
+        catch { }
+    }
+
     // ── Global hot key ───────────────────────────────────────────────────────
     // System-wide hotkey registration: Windows posts WM_HOTKEY to the registering window
     // regardless of which application currently has focus.

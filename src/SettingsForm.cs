@@ -35,6 +35,8 @@ internal sealed class SettingsForm : Form
 
     private UsageInfo _usage;
 
+    private FlowLayoutPanel _root = null!;
+
     /// <summary>Raised when the user toggles "Show usage limits" (true = enabled).</summary>
     public event Action<bool>? UsageEnabledChanged;
 
@@ -73,13 +75,14 @@ internal sealed class SettingsForm : Form
     protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        NativeMethods.UseDarkScrollBars(_root.Handle);
         await InitPermissionStateAsync();
     }
 
     // ── Layout ───────────────────────────────────────────────────────────────────
     private void BuildLayout()
     {
-        var root = new FlowLayoutPanel
+        var root = _root = new FlowLayoutPanel
         {
             Dock          = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
