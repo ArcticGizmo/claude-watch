@@ -1032,16 +1032,37 @@ internal sealed class OverlayForm : Form
     }
 
     // ── Hot key ────────────────────────────────────────────────────────────────
-    // Alt+Shift+W toggles dense mode. Only fires while the overlay has keyboard focus for now;
-    // a system-wide registration can be added later.
-    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    // Alt+Shift+W toggles dense mode from anywhere via a system-wide hotkey. Registered against
+    // the form's window handle; Windows posts WM_HOTKEY (handled in WndProc) when it fires.
+    private const int  HotkeyId    = 0xB001;
+    private const int  WM_HOTKEY   = 0x0312;
+    private const uint MOD_ALT     = 0x0001;
+    private const uint MOD_SHIFT   = 0x0004;
+    private const uint MOD_NOREPEAT= 0x4000;  // don't auto-repeat while the keys are held
+    private const uint VK_W        = 0x57;
+
+    protected override void OnHandleCreated(EventArgs e)
     {
-        if (keyData == (Keys.Alt | Keys.Shift | Keys.W))
+        base.OnHandleCreated(e);
+        // Best-effort: if another app already owns Alt+Shift+W this fails silently and the
+        // hotkey simply won't work, rather than crashing.
+        NativeMethods.RegisterHotKey(Handle, HotkeyId, MOD_ALT | MOD_SHIFT | MOD_NOREPEAT, VK_W);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        NativeMethods.UnregisterHotKey(Handle, HotkeyId);
+        base.OnHandleDestroyed(e);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HotkeyId)
         {
             ToggleDense();
-            return true;
+            return;
         }
-        return base.ProcessCmdKey(ref msg, keyData);
+        base.WndProc(ref m);
     }
 
     // ── Window style: no taskbar entry, no Alt+Tab ───────────────────────────

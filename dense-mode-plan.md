@@ -42,7 +42,7 @@ When in dense mode, dragging on the header only adjusts position **vertically** 
 Floating and dense modes maintain their own sets of coordinates separately. When you leave dense mode, the floating UI is restored to wherever it was last dragged.
 
 # Hot Key
-Toggling to and from dense mode is possible with **alt + shift + w**. For now this works only while the overlay is focused; a system-wide global hotkey can be added later.
+Toggling to and from dense mode is possible with **alt + shift + w**. This is a system-wide global hotkey (registered via `RegisterHotKey`), so it works from any window regardless of focus. If another application already owns the combination, registration fails silently and the hotkey simply has no effect.
 
 # Persistence
 Nothing new is persisted. Dense-vs-floating state and the dense strip's Y position are held in memory for the session only. Every launch starts in floating mode at the top-right (unchanged from today).
