@@ -38,34 +38,6 @@ URL, free, no keys, has iOS/Android apps.
 - [ ] Tray menu (`:51`) — add **"Phone Alerts…"** opening new `src/PushSettingsForm.cs`
       (enable checkbox, server, topic, **Send test** button); saves via `_settings.Save()`.
 
-## Feature 2 — Live activity in the overlay
-
-Show each running session's most recent tool call ("Reading X", "Running: npm test", "Editing Y").
-
-- [x] New `src/TranscriptReader.cs` — `GetActivity(sessionId, cwd)`: locate transcript, read only the
-      **tail** (~32 KB seek, `FileShare.ReadWrite`), parse from the end for the latest `tool_use`,
-      map `(toolName, input)` → friendly phrase; return `null` on any failure; never read whole file.
-- [x] `src/ClaudeSession.cs` — add optional `string? Activity = null` (last param; keeps call sites
-      compiling).
-- [x] `src/SessionMonitor.cs` `ReadSession` — only when `status == Running`, populate `Activity`.
-- [x] `src/OverlayForm.cs` `DrawRow` — dim second line under project name; `RowHeight` bumped
-      30→46 for the activity phrase. (`FormWidth` kept at 280 — activity truncates to fit.)
-- [x] `src/IndicatorTooltipForm.cs` — add activity line to hover tooltip.
-
-## Feature 3 — Token & cost tracking
-
-Read-only stats window: per-session / per-project / per-day tokens and estimated $.
-
-- [ ] New `src/UsageStats.cs` — `ModelPricing` table keyed by model id (unknown → Opus rate, flagged);
-      `Aggregate()` scans `~/.claude/projects/**/*.jsonl` summing `usage` per (project, model, day);
-      cost = Σ token-class × rate. Run on a background thread (`Task.Run`) with a "Calculating…" state.
-      Optional later: per-file `(lastWriteTime, length, summary)` cache for fast re-opens.
-- [ ] New `src/UsageStatsForm.cs` — dark WinForms window (match overlay palette); table
-      Project | Tokens (in/out/cache) | Est. cost; today + grand-total rows; **Refresh** button.
-- [ ] `src/OverlayApplicationContext.cs` — tray item **"Usage & Cost…"** (`:51`) opens/focuses one
-      `UsageStatsForm` instance.
-- [ ] (Optional) `src/IndicatorTooltipForm.cs` — show active session's running cost in tooltip.
-
 ---
 
 ## Verification
