@@ -49,6 +49,10 @@ internal sealed class SettingsForm : Form
     // Dimmed while the external master toggle is off.
     private ToggleSwitch _remoteLinkToggle = null!;
     private Label        _remoteLinkLabel  = null!;
+    // Sub-row toggle: push any session's alert while the screen is locked, without a per-session
+    // opt-in. Dimmed while the external master toggle is off.
+    private ToggleSwitch _lockNotifyToggle = null!;
+    private Label        _lockNotifyLabel  = null!;
 
     private UsageInfo _usage;
 
@@ -429,6 +433,7 @@ internal sealed class SettingsForm : Form
         topicRow.Controls.Add(qrBtn);
         root.Controls.Add(topicRow);
 
+        root.Controls.Add(BuildLockNotifyRow());
         root.Controls.Add(BuildRemoteLinkRow());
 
         var row = ButtonRow();
@@ -439,6 +444,41 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(row);
 
         ApplyExternalEnabled();
+    }
+
+    // An indented sub-row for the AFK override: while the screen is locked, push every session's
+    // alert without needing the per-session right-click opt-in. Dimmed while the external master
+    // toggle is off, since no push is sent then anyway.
+    private Panel BuildLockNotifyRow()
+    {
+        var row = new Panel
+        {
+            Width  = ContentWidth,
+            Height = 30,
+            Margin = new Padding(0, 2, 0, 4),
+        };
+
+        _lockNotifyLabel = new Label
+        {
+            Text      = "Notify any session while my screen is locked",
+            AutoSize  = true,
+            ForeColor = Theme.Fg,
+            Location  = new Point(16, 7),
+        };
+
+        _lockNotifyToggle = MakeToggle();
+        _lockNotifyToggle.Checked = _settings.NotifyWhenLocked;
+        _lockNotifyToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.NotifyWhenLocked = _lockNotifyToggle.Checked;
+            _settings.Save();
+        };
+        _lockNotifyToggle.Location = new Point(ContentWidth - _lockNotifyToggle.Width, (row.Height - _lockNotifyToggle.Height) / 2);
+        _lockNotifyToggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+
+        row.Controls.Add(_lockNotifyLabel);
+        row.Controls.Add(_lockNotifyToggle);
+        return row;
     }
 
     // An indented sub-row that opts remote-controlled sessions into carrying a claude.ai "Open
@@ -482,6 +522,8 @@ internal sealed class SettingsForm : Form
         bool on = _externalToggle.Checked;
         _remoteLinkToggle.Enabled  = on;
         _remoteLinkLabel.ForeColor = on ? Theme.Fg : Theme.Muted;
+        _lockNotifyToggle.Enabled  = on;
+        _lockNotifyLabel.ForeColor = on ? Theme.Fg : Theme.Muted;
     }
 
     // Mints a hard-to-guess topic of the form "claude-watch-{random}", padded with random

@@ -35,6 +35,12 @@ internal sealed class AppSettings
     public string? NtfyHost  { get; set; }
     public string? NtfyTopic { get; set; }
 
+    // Account-wide AFK override: when on, *any* session's external push fires while the Windows
+    // session is locked, even sessions that haven't been individually opted in via the overlay's
+    // right-click menu. Still gated by ExternalNotificationsEnabled (and the host/topic). Off by
+    // default. See [[LockMonitor]].
+    public bool NotifyWhenLocked { get; set; }
+
     // When on, a remote-controlled session's external push carries a "view" action that opens the
     // session on claude.ai (https://claude.ai/code/{bridgeSessionId}). Off by default — not
     // everyone wants the deep link in their notifications — and only relevant while the session

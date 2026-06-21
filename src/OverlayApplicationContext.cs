@@ -22,6 +22,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private readonly AppSettings _settings;
     private readonly PluginManager _pluginManager = new();
 
+    // Tracks workstation lock state so the AFK override can push any session's alert while locked.
+    private readonly LockMonitor _lockMonitor = new();
+
     // The settings window, lazily created on first open and reused while it stays open.
     private SettingsForm? _settingsForm;
 
@@ -331,7 +334,11 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // has opted in. Independent of the Windows-balloon per-type toggles above.
     private void MaybeSendExternal(NotificationKind kind, ClaudeSession session)
     {
-        if (!_settings.ExternalNotificationsEnabled || !_externalNotify.Contains(session.SessionId))
+        // A session pushes if it opted in (right-click menu) OR the account-wide AFK override is on
+        // and the screen is currently locked. The master switch gates both paths.
+        bool optedIn   = _externalNotify.Contains(session.SessionId);
+        bool afkActive = _settings.NotifyWhenLocked && _lockMonitor.IsLocked;
+        if (!_settings.ExternalNotificationsEnabled || (!optedIn && !afkActive))
             return;
 
         var (title, body, tags) = kind == NotificationKind.Done
@@ -460,6 +467,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _deadlineTimer.Dispose();
             _usageTimer.Dispose();
             _monitor.Dispose();
+            _lockMonitor.Dispose();
             _notifyIcon.Icon?.Dispose();
             _notifyIcon.Dispose();
             _settingsForm?.Dispose();
