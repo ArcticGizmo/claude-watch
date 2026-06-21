@@ -33,6 +33,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // can focus the right terminal.
     private string? _lastNotifiedPid;
 
+    // Session ids opted in to external (ntfy) notifications, set by right-clicking a session in the
+    // overlay. In-memory only — sessions are ephemeral, so this isn't persisted across restarts.
+    private readonly HashSet<string> _externalNotify = new();
+
     public OverlayApplicationContext()
     {
         _settings = AppSettings.Load();
@@ -41,6 +45,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.FormClosed     += (_, _) => ExitThread();
         _overlay.ExitRequested  += (_, _) => Exit();
         _overlay.SessionFocused += AcknowledgeSession;
+        _overlay.ExternalNotifyToggleRequested += OnToggleExternalNotify;
 
         _notifyIcon = new NotifyIcon
         {
@@ -94,6 +99,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         _overlay.Show();
         _overlay.SetUsageEnabled(_settings.ShowUsage);
+        _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
         _monitor.Scan();
 
         if (_settings.ShowUsage)
@@ -119,6 +125,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
         _settingsForm.TestNotificationRequested += ShowTestNotification;
+        _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
+        _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -220,20 +228,20 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         // The overlay's own attention flash is always on; only the Windows balloon is gated.
         _overlay.TriggerAttention();
 
-        if (!_settings.NotificationsEnabled || !_settings.NotifyOnDone)
-            return;
+        if (_settings.NotificationsEnabled && _settings.NotifyOnDone)
+            ShowSessionBalloon(NotificationKind.Done, session.ProjectName, session.Pid);
 
-        ShowSessionBalloon(NotificationKind.Done, session.ProjectName, session.Pid);
+        MaybeSendExternal(NotificationKind.Done, session);
     }
 
     private void OnAwaitingInput(ClaudeSession session)
     {
         _overlay.TriggerAttention();
 
-        if (!_settings.NotificationsEnabled || !_settings.NotifyOnWaitingInput)
-            return;
+        if (_settings.NotificationsEnabled && _settings.NotifyOnWaitingInput)
+            ShowSessionBalloon(NotificationKind.WaitingForInput, session.ProjectName, session.Pid);
 
-        ShowSessionBalloon(NotificationKind.WaitingForInput, session.ProjectName, session.Pid);
+        MaybeSendExternal(NotificationKind.WaitingForInput, session);
     }
 
     // Shows the desktop balloon for a session notification. A null pid means there's no real
@@ -261,6 +269,75 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // can preview exactly what that notification looks like, regardless of the saved toggles.
     private void ShowTestNotification(NotificationKind kind)
         => ShowSessionBalloon(kind, "example-project", null);
+
+    // ── External (ntfy) notifications ─────────────────────────────────────────────
+    // Flips a session's external-notify opt-in (from the overlay's right-click menu) and pushes the
+    // refreshed set back so the glyph and menu wording update.
+    private void OnToggleExternalNotify(string sessionId)
+    {
+        if (!_externalNotify.Remove(sessionId))
+            _externalNotify.Add(sessionId);
+        _overlay.SetExternalNotifySessions(_externalNotify);
+    }
+
+    // Mirrors the master switch into the overlay (it gates the glyph and the right-click item) and
+    // persists it. The host/topic are saved by the settings window itself.
+    private void SetExternalNotificationsEnabled(bool enabled)
+    {
+        _settings.ExternalNotificationsEnabled = enabled;
+        _settings.Save();
+        _overlay.SetExternalNotificationsAvailable(enabled);
+    }
+
+    // Pushes an external notification for a session, but only when the feature is on and that session
+    // has opted in. Independent of the Windows-balloon per-type toggles above.
+    private void MaybeSendExternal(NotificationKind kind, ClaudeSession session)
+    {
+        if (!_settings.ExternalNotificationsEnabled || !_externalNotify.Contains(session.SessionId))
+            return;
+
+        var (title, body, tags) = kind == NotificationKind.Done
+            ? ("Claude Code — Done", $"Waiting for you in {session.ProjectName}", "white_check_mark")
+            : ("Claude Code — Waiting for Input", $"{session.ProjectName} needs your response", "bell");
+
+        var host = _settings.NtfyHost;
+        var topic = _settings.NtfyTopic;
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(topic))
+            return;
+
+        // Fire-and-forget: a failed push must never stall or crash the monitor callback.
+        _ = NtfyNotifier.SendAsync(host, topic, title, body, tags);
+    }
+
+    // The settings window's "Send test notification": pushes a sample to the configured ntfy
+    // host/topic and reports the outcome via a tray balloon, so misconfiguration is visible.
+    private async void SendExternalTestNotification()
+    {
+        var host = _settings.NtfyHost;
+        var topic = _settings.NtfyTopic;
+        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(topic))
+        {
+            ShowInfoBalloon("Claude Watch — ntfy", "Enter a server URL and topic first.", ToolTipIcon.Warning);
+            return;
+        }
+
+        var (ok, error) = await NtfyNotifier.SendAsync(
+            host, topic, "Claude Watch — Test", "External notifications are working.", "bell");
+
+        ShowInfoBalloon("Claude Watch — ntfy",
+            ok ? "Test notification sent." : $"Failed to send: {error}",
+            ok ? ToolTipIcon.Info : ToolTipIcon.Error);
+    }
+
+    // A tray balloon not tied to any session (so a click won't focus a stale terminal).
+    private void ShowInfoBalloon(string title, string text, ToolTipIcon icon)
+    {
+        _lastNotifiedPid = null;
+        _notifyIcon.BalloonTipTitle = title;
+        _notifyIcon.BalloonTipText  = text;
+        _notifyIcon.BalloonTipIcon  = icon;
+        _notifyIcon.ShowBalloonTip(5000);
+    }
 
     // Clicking the desktop notification focuses the terminal for the session that
     // raised it and acknowledges the alert, mirroring an overlay/indicator click.

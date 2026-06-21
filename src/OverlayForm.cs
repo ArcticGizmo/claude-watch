@@ -22,6 +22,7 @@ internal sealed class OverlayForm : Form
     private const int HorizPad          = 12;
     private const int Corner            = 10;
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
+    private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
 
     // Dense mode: a narrow strip hugging the right screen edge that expands on hover.
     private const int DenseClosedWidth = 44;
@@ -50,6 +51,7 @@ internal sealed class OverlayForm : Form
     private static readonly Color RowHoverColor  = Color.FromArgb(25,  25,  38);
     private static readonly Color SubAgentColor  = Color.FromArgb(56,  189, 248);
     private static readonly Color RemoteColor    = Color.FromArgb(96,  165, 250);
+    private static readonly Color MailColor      = Color.FromArgb(94,  234, 212);
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
     private static readonly Color UsageRedColor  = Color.FromArgb(239, 68,  68);
     private static readonly Color UsageTrackColor= Color.FromArgb(38,  38,  52);
@@ -110,8 +112,18 @@ internal sealed class OverlayForm : Form
     // the expanded state; in dense mode it's the hover-opened popup.
     private bool ShowFullPanel => _dense ? _denseOpen : _expanded;
 
+    // External (ntfy) notifications. _externalNotifyAvailable mirrors the global setting and gates
+    // both the per-session glyph and the right-click toggle; _externalNotifySessions holds the
+    // session ids opted in. Both are pushed in from the owning context, which is the source of truth.
+    private bool _externalNotifyAvailable;
+    private HashSet<string> _externalNotifySessions = new();
+
     public event EventHandler? ExitRequested;
     public event Action<string>? SessionFocused;
+
+    /// <summary>Raised when the user picks "Enable/Disable external notifications" for a session;
+    /// carries that session's id for the context to flip its opt-in state.</summary>
+    public event Action<string>? ExternalNotifyToggleRequested;
 
     // ── Construction ──────────────────────────────────────────────────────────
     public OverlayForm()
@@ -230,6 +242,28 @@ internal sealed class OverlayForm : Form
         RelayoutWindow();
         Invalidate();
     }
+
+    // Whether external (ntfy) notifications are switched on globally. Controls whether the per-session
+    // mail glyph and the right-click enable/disable item appear at all.
+    public void SetExternalNotificationsAvailable(bool available)
+    {
+        if (_externalNotifyAvailable == available) return;
+        _externalNotifyAvailable = available;
+        Invalidate();
+    }
+
+    // The set of session ids currently opted in to external notifications. Copied so the caller can
+    // keep mutating its own set without affecting what we render.
+    public void SetExternalNotifySessions(IEnumerable<string> sessionIds)
+    {
+        _externalNotifySessions = new HashSet<string>(sessionIds);
+        Invalidate();
+    }
+
+    // True when the mail glyph / "Disable" wording applies to this session: the feature is on and the
+    // session has opted in.
+    private bool ExternalNotifyEnabled(ClaudeSession session) =>
+        _externalNotifyAvailable && _externalNotifySessions.Contains(session.SessionId);
 
     // The run-time labels only need a per-second repaint when they're actually on screen.
     private void UpdateTickTimer()
@@ -656,6 +690,30 @@ internal sealed class OverlayForm : Form
         g.SmoothingMode = oldSmoothing;
     }
 
+    // The external-notify indicator: a small envelope with a "send" arrow rising from it, drawn when
+    // a session is opted in to ntfy pushes. Pure GDI so it themes and scales like the other glyphs.
+    private static void DrawMailIcon(Graphics g, int x, int midY)
+    {
+        var oldSmoothing = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        using var pen = new Pen(MailColor, 1.3f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+
+        const int w = 11, h = 8;
+        int top  = midY - h / 2;
+        var body = new Rectangle(x, top, w, h);
+        g.DrawRectangle(pen, body);
+        // Envelope flap: two strokes meeting at the centre top, like a "V" tucked under the lid.
+        g.DrawLines(pen, new[]
+        {
+            new Point(x,         top),
+            new Point(x + w / 2, top + h / 2),
+            new Point(x + w,     top),
+        });
+
+        g.SmoothingMode = oldSmoothing;
+    }
+
     private static Bitmap? LoadEmbeddedBitmap(string resourceName)
     {
         try
@@ -868,19 +926,24 @@ internal sealed class OverlayForm : Form
             _                            => mutedBrush,
         };
 
+        bool mail        = ExternalNotifyEnabled(session);
+        int mailWidth    = mail ? MailIconWidth : 0;
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
         int rcWidth      = session.RemoteControlled ? RcIconWidth : 0;
         var statusSz     = g.MeasureString(statusText, statusFont);
-        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth;
+        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth;
         var nameTrunc    = TruncateString(g, session.ProjectName, nameFont, nameMaxWidth);
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
-        // Remote-control glyph sits just right of the status dot and pushes the name across.
+        // Glyphs sit just right of the status dot and push the name across: the mail glyph first
+        // (external notifications opted in), then the remote-control broadcast glyph.
+        if (mail)
+            DrawMailIcon(g, HorizPad + 14, nameMidY);
         if (session.RemoteControlled)
-            DrawRemoteIcon(g, HorizPad + 16, nameMidY);
+            DrawRemoteIcon(g, HorizPad + 16 + mailWidth, nameMidY);
 
         g.DrawString(nameTrunc, nameFont, fgBrush,
-            HorizPad + 14 + rcWidth, nameMidY - nameSz.Height / 2);
+            HorizPad + 14 + mailWidth + rcWidth, nameMidY - nameSz.Height / 2);
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
@@ -1158,6 +1221,17 @@ internal sealed class OverlayForm : Form
         int row = HitTestRow(clientPt);
         if (row >= 0 && _rows[row].Session is { RemoteControlled: true } rc)
             items.Add(("Show QR code", () => ShowQrCode(rc)));
+
+        // Per-session external-notify toggle — only on a real session row, and only while the feature
+        // is switched on globally. Sub-agent rows share the parent session, so skip them.
+        if (row >= 0 && !_rows[row].IsSubAgent && _externalNotifyAvailable)
+        {
+            var s = _rows[row].Session;
+            string label = ExternalNotifyEnabled(s)
+                ? "Disable external notifications"
+                : "Enable external notifications";
+            items.Add((label, () => ExternalNotifyToggleRequested?.Invoke(s.SessionId)));
+        }
 
         bool headerVisible = !(_dense && !_denseOpen);
         bool overHeader = headerVisible && clientPt.Y >= 0 && clientPt.Y < HeaderHeight;

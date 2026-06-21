@@ -12,9 +12,9 @@ using System.Diagnostics;
 /// </summary>
 internal sealed class SettingsForm : Form
 {
-    // Inner content width (~50% wider than the original 372). The client is sized to fit this
-    // plus the 16px padding either side and room for a vertical scrollbar, so nothing clips.
-    private const int ContentWidth = 552;
+    // Inner content width. The client is sized to fit this plus the 16px padding either side and
+    // room for a vertical scrollbar, so nothing clips.
+    private const int ContentWidth = 607;
 
     private readonly AppSettings   _settings;
     private readonly PluginManager _pluginManager;
@@ -39,6 +39,13 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _notifyMasterToggle = null!;
     private readonly List<(Label label, ToggleSwitch toggle, Button test)> _notifySubRows = new();
 
+    // External notifications (ntfy) section. The host/topic boxes stay editable regardless of the
+    // toggle, so they can be set up (and tested) before the feature is switched on.
+    private ToggleSwitch _externalToggle = null!;
+    private TextBox      _ntfyHostBox    = null!;
+    private TextBox      _ntfyTopicBox   = null!;
+    private QrCodeForm?  _topicQrForm;
+
     private UsageInfo _usage;
 
     private FlowLayoutPanel _root = null!;
@@ -51,6 +58,12 @@ internal sealed class SettingsForm : Form
 
     /// <summary>Raised when the user clicks a per-type "Test" button, to preview that notification.</summary>
     public event Action<NotificationKind>? TestNotificationRequested;
+
+    /// <summary>Raised when the user toggles external (ntfy) notifications (true = enabled).</summary>
+    public event Action<bool>? ExternalNotificationsEnabledChanged;
+
+    /// <summary>Raised when the user clicks "Send test notification" for the external (ntfy) channel.</summary>
+    public event Action? TestExternalNotificationRequested;
 
     public SettingsForm(AppSettings settings, PluginManager pluginManager,
                         UsageMonitor usageMonitor, UsageInfo currentUsage)
@@ -67,7 +80,7 @@ internal sealed class SettingsForm : Form
         BackColor       = Theme.FormBg;
         ForeColor       = Theme.Fg;
         Font            = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        ClientSize      = new Size(ContentWidth + 50, 780);
+        ClientSize      = new Size(ContentWidth + 50, 858);
         if (_icon != null)
             Icon = Icon.FromHandle(_icon.GetHicon());
 
@@ -108,6 +121,8 @@ internal sealed class SettingsForm : Form
         BuildUsageSection(root);
         root.Controls.Add(Separator());
         BuildNotificationsSection(root);
+        root.Controls.Add(Separator());
+        BuildExternalSection(root);
         root.Controls.Add(Separator());
         BuildUpdatesSection(root);
 
@@ -334,6 +349,124 @@ internal sealed class SettingsForm : Form
         }
     }
 
+    // External notifications via ntfy. The toggle only gates whether pushes are sent (and whether
+    // the per-session opt-in is offered in the overlay); the host/topic boxes stay enabled either
+    // way so they can be filled in and tested before turning the feature on.
+    private void BuildExternalSection(FlowLayoutPanel root)
+    {
+        _externalToggle = MakeToggle();
+        _externalToggle.Checked = _settings.ExternalNotificationsEnabled;
+        _externalToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.ExternalNotificationsEnabled = _externalToggle.Checked;
+            _settings.Save();
+            ExternalNotificationsEnabledChanged?.Invoke(_externalToggle.Checked);
+        };
+        root.Controls.Add(TitleRow("External notifications", _externalToggle));
+
+        root.Controls.Add(BodyText(
+            "Also push \"Done\" and \"Waiting for input\" alerts to your phone or other devices via " +
+            "ntfy. Enter your server and topic below, then enable it per session by right-clicking " +
+            "that session in the overlay."));
+
+        // Default the host to the public server, but only in-memory until the box is edited — opening
+        // settings shouldn't silently rewrite settings.json.
+        string host = string.IsNullOrWhiteSpace(_settings.NtfyHost) ? "https://ntfy.sh" : _settings.NtfyHost!;
+        _settings.NtfyHost = host;
+
+        root.Controls.Add(FieldCaption("Server URL"));
+        _ntfyHostBox = MakeTextBox(host);
+        _ntfyHostBox.TextChanged += (_, _) => _settings.NtfyHost = _ntfyHostBox.Text;
+        _ntfyHostBox.Leave       += (_, _) => _settings.Save();
+        root.Controls.Add(_ntfyHostBox);
+
+        root.Controls.Add(FieldCaption("Topic"));
+
+        // Topic box with two helpers beside it: "Generate" mints a hard-to-guess 64-char topic, and
+        // "QR code" shows an ntfy:// subscribe link for scanning on a phone.
+        var topicRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents  = false,
+            AutoSize      = true,
+            AutoSizeMode  = AutoSizeMode.GrowAndShrink,
+            Margin        = new Padding(0, 0, 0, 8),
+        };
+
+        _ntfyTopicBox = MakeTextBox(_settings.NtfyTopic ?? "");
+        _ntfyTopicBox.Width  = ContentWidth - 180;
+        _ntfyTopicBox.Margin = new Padding(0, 0, 8, 0);
+        _ntfyTopicBox.TextChanged += (_, _) => _settings.NtfyTopic = _ntfyTopicBox.Text;
+        _ntfyTopicBox.Leave       += (_, _) => _settings.Save();
+
+        var genBtn = MakeButton("Generate");
+        genBtn.AutoSize  = false;
+        genBtn.Size      = new Size(86, 24);
+        genBtn.Margin    = new Padding(0, 0, 8, 0);
+        genBtn.Padding   = new Padding(0);
+        genBtn.TextAlign = ContentAlignment.MiddleCenter;
+        genBtn.Click += (_, _) =>
+        {
+            _ntfyTopicBox.Text = GenerateTopic();   // raises TextChanged -> updates _settings.NtfyTopic
+            _settings.Save();
+        };
+
+        var qrBtn = MakeButton("QR code");
+        qrBtn.AutoSize  = false;
+        qrBtn.Size      = new Size(78, 24);
+        qrBtn.Margin    = new Padding(0);
+        qrBtn.Padding   = new Padding(0);
+        qrBtn.TextAlign = ContentAlignment.MiddleCenter;
+        qrBtn.Click += (_, _) => ShowTopicQr();
+
+        topicRow.Controls.Add(_ntfyTopicBox);
+        topicRow.Controls.Add(genBtn);
+        topicRow.Controls.Add(qrBtn);
+        root.Controls.Add(topicRow);
+
+        var row = ButtonRow();
+        row.Margin = new Padding(0, 4, 0, 4);
+        var testBtn = MakeButton("Send test notification");
+        testBtn.Click += (_, _) => { _settings.Save(); TestExternalNotificationRequested?.Invoke(); };
+        row.Controls.Add(testBtn);
+        root.Controls.Add(row);
+    }
+
+    // Mints a hard-to-guess topic of the form "claude-watch-{random}", padded with random
+    // alphanumerics to a total length of 64 — long enough that the topic doubles as the secret.
+    private static string GenerateTopic()
+    {
+        const string prefix = "claude-watch-";
+        const string chars  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        var buf = new char[64];
+        prefix.CopyTo(0, buf, 0, prefix.Length);
+        for (int i = prefix.Length; i < buf.Length; i++)
+            buf[i] = chars[Random.Shared.Next(chars.Length)];
+        return new string(buf);
+    }
+
+    // Shows a QR card encoding ntfy://<host>/<topic> (host with any scheme stripped), so the topic
+    // can be subscribed to by scanning it in the ntfy phone app. Only one card is shown at a time.
+    private void ShowTopicQr()
+    {
+        var topic = _ntfyTopicBox.Text.Trim();
+        if (topic.Length == 0) return;
+
+        var host = _ntfyHostBox.Text.Trim();
+        int scheme = host.IndexOf("://", StringComparison.Ordinal);
+        if (scheme >= 0) host = host[(scheme + 3)..];
+        host = host.Trim('/');
+
+        var url = $"ntfy://{host}/{topic}";
+
+        _topicQrForm?.Close();
+        _topicQrForm = new QrCodeForm("ntfy subscription", url);
+        _topicQrForm.FormClosed += (_, _) => _topicQrForm = null;
+        _topicQrForm.CenterOn(Screen.FromControl(this));
+        _topicQrForm.Show();
+        _topicQrForm.Activate();
+    }
+
     private void BuildUpdatesSection(FlowLayoutPanel root)
     {
         root.Controls.Add(SectionTitle("Updates"));
@@ -486,6 +619,27 @@ internal sealed class SettingsForm : Form
 
     private static ToggleSwitch MakeToggle() => new() { Margin = new Padding(0) };
 
+    // A small muted caption sitting just above a text field.
+    private static Label FieldCaption(string text) => new()
+    {
+        Text      = text,
+        AutoSize  = true,
+        ForeColor = Theme.Muted,
+        Margin    = new Padding(0, 2, 0, 2),
+    };
+
+    // A dark-themed single-line text box matching the rest of the settings surface.
+    private static TextBox MakeTextBox(string value) => new()
+    {
+        Text        = value,
+        Width       = ContentWidth,
+        BackColor   = Theme.ButtonBg,
+        ForeColor   = Theme.Fg,
+        BorderStyle = BorderStyle.FixedSingle,
+        Font        = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point),
+        Margin      = new Padding(0, 0, 0, 8),
+    };
+
     private static Label BodyText(string text) => new()
     {
         Text        = text,
@@ -567,7 +721,10 @@ internal sealed class SettingsForm : Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             _icon?.Dispose();
+            _topicQrForm?.Close();
+        }
         base.Dispose(disposing);
     }
 }
