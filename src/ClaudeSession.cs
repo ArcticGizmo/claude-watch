@@ -46,7 +46,8 @@ public record ClaudeSession(
     PermissionMode Mode = PermissionMode.Normal,
     IReadOnlyList<SubAgent>? SubAgents = null,
     string? Activity = null,
-    DateTime? RunningSince = null
+    DateTime? RunningSince = null,
+    bool RemoteControlled = false
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>

@@ -21,6 +21,7 @@ internal sealed class OverlayForm : Form
     private const int SubIndent         = 22;
     private const int HorizPad          = 12;
     private const int Corner            = 10;
+    private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
 
     // Dense mode: a narrow strip hugging the right screen edge that expands on hover.
     private const int DenseClosedWidth = 44;
@@ -48,6 +49,7 @@ internal sealed class OverlayForm : Form
     private static readonly Color SepColor       = Color.FromArgb(35,  35,  50);
     private static readonly Color RowHoverColor  = Color.FromArgb(25,  25,  38);
     private static readonly Color SubAgentColor  = Color.FromArgb(56,  189, 248);
+    private static readonly Color RemoteColor    = Color.FromArgb(96,  165, 250);
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
     private static readonly Color UsageRedColor  = Color.FromArgb(239, 68,  68);
     private static readonly Color UsageTrackColor= Color.FromArgb(38,  38,  52);
@@ -636,6 +638,26 @@ internal sealed class OverlayForm : Form
         }
     }
 
+    // The remote-control indicator: a "broadcast" glyph — a source dot at the lower-left with two
+    // quarter-arcs radiating up and to the right. Pure GDI so it themes and scales like the mode
+    // badge and the collapse arrow. Drawn on a row only while that session is being remote-controlled
+    // (its session file carries a bridgeSessionId); the origin x is the dot, waves grow up-right.
+    private static void DrawRemoteIcon(Graphics g, int originX, int midY)
+    {
+        var oldSmoothing = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        using var pen   = new Pen(RemoteColor, 1.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var brush = new SolidBrush(RemoteColor);
+
+        int oy = midY + 4;                                       // origin sits low so waves rise through the row
+        g.FillEllipse(brush, originX - 1, oy - 1, 3, 3);         // source dot
+        g.DrawArc(pen, originX - 5, oy - 5, 10, 10, 270, 90);    // inner wave
+        g.DrawArc(pen, originX - 9, oy - 9, 18, 18, 270, 90);    // outer wave
+
+        g.SmoothingMode = oldSmoothing;
+    }
+
     private static Bitmap? LoadEmbeddedBitmap(string resourceName)
     {
         try
@@ -849,13 +871,18 @@ internal sealed class OverlayForm : Form
         };
 
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
+        int rcWidth      = session.RemoteControlled ? RcIconWidth : 0;
         var statusSz     = g.MeasureString(statusText, statusFont);
-        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth;
+        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth;
         var nameTrunc    = TruncateString(g, session.ProjectName, nameFont, nameMaxWidth);
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
+        // Remote-control glyph sits just right of the status dot and pushes the name across.
+        if (session.RemoteControlled)
+            DrawRemoteIcon(g, HorizPad + 16, nameMidY);
+
         g.DrawString(nameTrunc, nameFont, fgBrush,
-            HorizPad + 14, nameMidY - nameSz.Height / 2);
+            HorizPad + 14 + rcWidth, nameMidY - nameSz.Height / 2);
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
