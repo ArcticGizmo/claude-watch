@@ -44,6 +44,7 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _externalToggle = null!;
     private TextBox      _ntfyHostBox    = null!;
     private TextBox      _ntfyTopicBox   = null!;
+    private QrCodeForm?  _topicQrForm;
 
     private UsageInfo _usage;
 
@@ -380,10 +381,44 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(_ntfyHostBox);
 
         root.Controls.Add(FieldCaption("Topic"));
+
+        // Topic box with two helpers beside it: "Generate" mints a hard-to-guess 64-char topic, and
+        // "QR code" shows an ntfy:// subscribe link for scanning on a phone.
+        var topicRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents  = false,
+            AutoSize      = true,
+            AutoSizeMode  = AutoSizeMode.GrowAndShrink,
+            Margin        = new Padding(0, 0, 0, 8),
+        };
+
         _ntfyTopicBox = MakeTextBox(_settings.NtfyTopic ?? "");
+        _ntfyTopicBox.Width  = ContentWidth - 180;
+        _ntfyTopicBox.Margin = new Padding(0, 0, 8, 0);
         _ntfyTopicBox.TextChanged += (_, _) => _settings.NtfyTopic = _ntfyTopicBox.Text;
         _ntfyTopicBox.Leave       += (_, _) => _settings.Save();
-        root.Controls.Add(_ntfyTopicBox);
+
+        var genBtn = MakeButton("Generate");
+        genBtn.AutoSize = false;
+        genBtn.Size     = new Size(86, 24);
+        genBtn.Margin   = new Padding(0, 0, 8, 0);
+        genBtn.Click += (_, _) =>
+        {
+            _ntfyTopicBox.Text = GenerateTopic();   // raises TextChanged -> updates _settings.NtfyTopic
+            _settings.Save();
+        };
+
+        var qrBtn = MakeButton("QR code");
+        qrBtn.AutoSize = false;
+        qrBtn.Size     = new Size(78, 24);
+        qrBtn.Margin   = new Padding(0);
+        qrBtn.Click += (_, _) => ShowTopicQr();
+
+        topicRow.Controls.Add(_ntfyTopicBox);
+        topicRow.Controls.Add(genBtn);
+        topicRow.Controls.Add(qrBtn);
+        root.Controls.Add(topicRow);
 
         var row = ButtonRow();
         row.Margin = new Padding(0, 4, 0, 4);
@@ -391,6 +426,41 @@ internal sealed class SettingsForm : Form
         testBtn.Click += (_, _) => { _settings.Save(); TestExternalNotificationRequested?.Invoke(); };
         row.Controls.Add(testBtn);
         root.Controls.Add(row);
+    }
+
+    // Mints a hard-to-guess topic of the form "claude-watch-{random}", padded with random
+    // alphanumerics to a total length of 64 — long enough that the topic doubles as the secret.
+    private static string GenerateTopic()
+    {
+        const string prefix = "claude-watch-";
+        const string chars  = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        var buf = new char[64];
+        prefix.CopyTo(0, buf, 0, prefix.Length);
+        for (int i = prefix.Length; i < buf.Length; i++)
+            buf[i] = chars[Random.Shared.Next(chars.Length)];
+        return new string(buf);
+    }
+
+    // Shows a QR card encoding ntfy://<host>/<topic> (host with any scheme stripped), so the topic
+    // can be subscribed to by scanning it in the ntfy phone app. Only one card is shown at a time.
+    private void ShowTopicQr()
+    {
+        var topic = _ntfyTopicBox.Text.Trim();
+        if (topic.Length == 0) return;
+
+        var host = _ntfyHostBox.Text.Trim();
+        int scheme = host.IndexOf("://", StringComparison.Ordinal);
+        if (scheme >= 0) host = host[(scheme + 3)..];
+        host = host.Trim('/');
+
+        var url = $"ntfy://{host}/{topic}";
+
+        _topicQrForm?.Close();
+        _topicQrForm = new QrCodeForm("ntfy subscription", url);
+        _topicQrForm.FormClosed += (_, _) => _topicQrForm = null;
+        _topicQrForm.CenterOn(Screen.FromControl(this));
+        _topicQrForm.Show();
+        _topicQrForm.Activate();
     }
 
     private void BuildUpdatesSection(FlowLayoutPanel root)
@@ -647,7 +717,10 @@ internal sealed class SettingsForm : Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
             _icon?.Dispose();
+            _topicQrForm?.Close();
+        }
         base.Dispose(disposing);
     }
 }
