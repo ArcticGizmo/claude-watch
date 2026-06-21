@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Published executable
 *.exe
+
+# worktrees
+.claude/worktrees
