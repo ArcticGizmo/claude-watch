@@ -25,6 +25,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // The settings window, lazily created on first open and reused while it stays open.
     private SettingsForm? _settingsForm;
 
+    // The history viewer, lazily created on first open and reused while it stays open.
+    private HistoryViewerForm? _historyForm;
+
+    // The most recent set of live sessions, so a freshly-opened history viewer knows which sessions
+    // are active without waiting for the next scan.
+    private IReadOnlyList<ClaudeSession> _sessions = [];
+
     // Most recent usage reading, so a freshly-opened settings window can show it without waiting
     // for the next poll. Empty until the first successful (or attempted) fetch.
     private UsageInfo _lastUsage = UsageInfo.Empty;
@@ -46,6 +53,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.ExitRequested  += (_, _) => Exit();
         _overlay.SessionFocused += AcknowledgeSession;
         _overlay.ExternalNotifyToggleRequested += OnToggleExternalNotify;
+        _overlay.HistoryRequested += OpenHistoryViewer;
 
         _notifyIcon = new NotifyIcon
         {
@@ -62,6 +70,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         var header = new ToolStripMenuItem($"Claude Watch — v{AppInfo.Version}") { Enabled = false };
         var settingsItem = new ToolStripMenuItem("Settings…");
         settingsItem.Click += (_, _) => OpenSettings();
+        var historyItem = new ToolStripMenuItem("Session history…");
+        historyItem.Click += (_, _) => OpenHistoryViewer(null);
         var updateItem = new ToolStripMenuItem("Check for Updates…");
         updateItem.Click += (_, _) => CheckForUpdates();
         var exitItem = new ToolStripMenuItem("Exit Claude Watch");
@@ -70,6 +80,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         trayMenu.Items.Add(header);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(settingsItem);
+        trayMenu.Items.Add(historyItem);
         trayMenu.Items.Add(updateItem);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
@@ -132,6 +143,30 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.Activate();
     }
 
+    // Opens (or re-focuses) the history viewer and points it at the given session. A null sessionId
+    // (from the tray menu) lands on the most-recent session. Seeds the viewer with the current live
+    // sessions so active indicators are right immediately.
+    private void OpenHistoryViewer(string? sessionId)
+    {
+        if (_historyForm is { IsDisposed: false })
+        {
+            if (_historyForm.WindowState == FormWindowState.Minimized)
+                _historyForm.WindowState = FormWindowState.Normal;
+            _historyForm.SetActiveSessions(_sessions);
+            _historyForm.SelectSession(sessionId);
+            _historyForm.Activate();
+            _historyForm.BringToFront();
+            return;
+        }
+
+        _historyForm = new HistoryViewerForm();
+        _historyForm.FormClosed += (_, _) => _historyForm = null;
+        _historyForm.Show();
+        _historyForm.SetActiveSessions(_sessions);
+        _historyForm.SelectSession(sessionId);
+        _historyForm.Activate();
+    }
+
     // Toggles the usage bars. Disabling stops all polling so no OAuth query ever goes out;
     // enabling kicks off an immediate refresh and resumes the timer.
     private void SetUsageEnabled(bool enabled)
@@ -177,7 +212,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private void OnSessionsChanged(IReadOnlyList<ClaudeSession> sessions)
     {
+        _sessions = sessions;
         _overlay.UpdateSessions(sessions);
+        if (_historyForm is { IsDisposed: false })
+            _historyForm.SetActiveSessions(sessions);
         ArmDeadlineTimer();
 
         _notifyIcon.Text = sessions.Count switch
@@ -403,6 +441,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _notifyIcon.Visible = false;
         if (_settingsForm is { IsDisposed: false })
             _settingsForm.Close();
+        if (_historyForm is { IsDisposed: false })
+            _historyForm.Close();
         _overlay.Close();
     }
 
@@ -417,6 +457,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _notifyIcon.Icon?.Dispose();
             _notifyIcon.Dispose();
             _settingsForm?.Dispose();
+            _historyForm?.Dispose();
             _overlay.Dispose();
         }
         base.Dispose(disposing);

@@ -65,6 +65,17 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
+    // ── Borderless window drag / bulk control updates ───────────────────────────
+    // ReleaseCapture + WM_NCLBUTTONDOWN(HTCAPTION) lets a borderless window be dragged from a
+    // custom title bar; SendMessage(WM_SETREDRAW) brackets bulk RichTextBox appends to kill flicker.
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    internal static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(IntPtr hWnd);

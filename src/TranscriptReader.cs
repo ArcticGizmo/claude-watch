@@ -126,7 +126,7 @@ internal sealed class TranscriptReader
                     var name = block["name"]?.GetValue<string>();
                     if (string.IsNullOrEmpty(name))
                         continue;
-                    latest = Describe(name, block["input"]);
+                    latest = ToolSummary.Describe(name, block["input"]);
                 }
             }
             catch
@@ -136,63 +136,5 @@ internal sealed class TranscriptReader
         }
 
         return latest;
-    }
-
-    /// <summary>Maps a tool name + its input to a short present-tense phrase.</summary>
-    private static string Describe(string tool, JsonNode? input)
-    {
-        string? Str(string key) => input?[key]?.GetValue<string>();
-
-        switch (tool)
-        {
-            case "Read":
-                return "Reading " + FileLabel(Str("file_path"));
-            case "Edit":
-            case "MultiEdit":
-                return "Editing " + FileLabel(Str("file_path"));
-            case "Write":
-                return "Writing " + FileLabel(Str("file_path"));
-            case "NotebookEdit":
-                return "Editing " + FileLabel(Str("notebook_path"));
-            case "Bash":
-                return "Running: " + Clip(Str("command") ?? "command");
-            case "Grep":
-                return "Searching: " + Clip(Str("pattern") ?? "");
-            case "Glob":
-                return "Finding: " + Clip(Str("pattern") ?? "");
-            case "Task":
-            case "Agent":
-                return "Delegating: " + Clip(Str("description") ?? "sub-agent");
-            case "WebFetch":
-                return "Fetching " + Clip(Str("url") ?? "");
-            case "WebSearch":
-                return "Searching web: " + Clip(Str("query") ?? "");
-            case "TodoWrite":
-                return "Updating todos";
-            default:
-                return tool;
-        }
-    }
-
-    private static string FileLabel(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return "file";
-        try
-        {
-            var name = Path.GetFileName(path.TrimEnd('/', '\\'));
-            return string.IsNullOrEmpty(name) ? Clip(path) : name;
-        }
-        catch
-        {
-            return Clip(path);
-        }
-    }
-
-    private static string Clip(string s)
-    {
-        s = s.Replace("\r", " ").Replace("\n", " ").Trim();
-        const int max = 60;
-        return s.Length <= max ? s : s[..max].TrimEnd() + "…";
     }
 }
