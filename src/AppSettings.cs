@@ -27,6 +27,14 @@ internal sealed class AppSettings
     public bool NotifyOnDone { get; set; } = true;
     public bool NotifyOnWaitingInput { get; set; } = true;
 
+    // External notifications via ntfy (https://ntfy.sh). The master switch gates whether any
+    // external push is sent and whether the per-session toggle is offered in the overlay; the
+    // host and topic stay saved and editable while it's off. Which sessions actually push is an
+    // in-memory, per-session opt-in (right-click a session) and isn't persisted here.
+    public bool ExternalNotificationsEnabled { get; set; }
+    public string? NtfyHost  { get; set; }
+    public string? NtfyTopic { get; set; }
+
     public static AppSettings Load()
     {
         try

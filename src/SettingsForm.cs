@@ -39,6 +39,12 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _notifyMasterToggle = null!;
     private readonly List<(Label label, ToggleSwitch toggle, Button test)> _notifySubRows = new();
 
+    // External notifications (ntfy) section. The host/topic boxes stay editable regardless of the
+    // toggle, so they can be set up (and tested) before the feature is switched on.
+    private ToggleSwitch _externalToggle = null!;
+    private TextBox      _ntfyHostBox    = null!;
+    private TextBox      _ntfyTopicBox   = null!;
+
     private UsageInfo _usage;
 
     private FlowLayoutPanel _root = null!;
@@ -51,6 +57,12 @@ internal sealed class SettingsForm : Form
 
     /// <summary>Raised when the user clicks a per-type "Test" button, to preview that notification.</summary>
     public event Action<NotificationKind>? TestNotificationRequested;
+
+    /// <summary>Raised when the user toggles external (ntfy) notifications (true = enabled).</summary>
+    public event Action<bool>? ExternalNotificationsEnabledChanged;
+
+    /// <summary>Raised when the user clicks "Send test notification" for the external (ntfy) channel.</summary>
+    public event Action? TestExternalNotificationRequested;
 
     public SettingsForm(AppSettings settings, PluginManager pluginManager,
                         UsageMonitor usageMonitor, UsageInfo currentUsage)
@@ -108,6 +120,8 @@ internal sealed class SettingsForm : Form
         BuildUsageSection(root);
         root.Controls.Add(Separator());
         BuildNotificationsSection(root);
+        root.Controls.Add(Separator());
+        BuildExternalSection(root);
         root.Controls.Add(Separator());
         BuildUpdatesSection(root);
 
@@ -334,6 +348,51 @@ internal sealed class SettingsForm : Form
         }
     }
 
+    // External notifications via ntfy. The toggle only gates whether pushes are sent (and whether
+    // the per-session opt-in is offered in the overlay); the host/topic boxes stay enabled either
+    // way so they can be filled in and tested before turning the feature on.
+    private void BuildExternalSection(FlowLayoutPanel root)
+    {
+        _externalToggle = MakeToggle();
+        _externalToggle.Checked = _settings.ExternalNotificationsEnabled;
+        _externalToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.ExternalNotificationsEnabled = _externalToggle.Checked;
+            _settings.Save();
+            ExternalNotificationsEnabledChanged?.Invoke(_externalToggle.Checked);
+        };
+        root.Controls.Add(TitleRow("External notifications", _externalToggle));
+
+        root.Controls.Add(BodyText(
+            "Also push \"Done\" and \"Waiting for input\" alerts to your phone or other devices via " +
+            "ntfy. Enter your server and topic below, then enable it per session by right-clicking " +
+            "that session in the overlay."));
+
+        // Default the host to the public server, but only in-memory until the box is edited — opening
+        // settings shouldn't silently rewrite settings.json.
+        string host = string.IsNullOrWhiteSpace(_settings.NtfyHost) ? "https://ntfy.sh" : _settings.NtfyHost!;
+        _settings.NtfyHost = host;
+
+        root.Controls.Add(FieldCaption("Server URL"));
+        _ntfyHostBox = MakeTextBox(host);
+        _ntfyHostBox.TextChanged += (_, _) => _settings.NtfyHost = _ntfyHostBox.Text;
+        _ntfyHostBox.Leave       += (_, _) => _settings.Save();
+        root.Controls.Add(_ntfyHostBox);
+
+        root.Controls.Add(FieldCaption("Topic"));
+        _ntfyTopicBox = MakeTextBox(_settings.NtfyTopic ?? "");
+        _ntfyTopicBox.TextChanged += (_, _) => _settings.NtfyTopic = _ntfyTopicBox.Text;
+        _ntfyTopicBox.Leave       += (_, _) => _settings.Save();
+        root.Controls.Add(_ntfyTopicBox);
+
+        var row = ButtonRow();
+        row.Margin = new Padding(0, 4, 0, 4);
+        var testBtn = MakeButton("Send test notification");
+        testBtn.Click += (_, _) => { _settings.Save(); TestExternalNotificationRequested?.Invoke(); };
+        row.Controls.Add(testBtn);
+        root.Controls.Add(row);
+    }
+
     private void BuildUpdatesSection(FlowLayoutPanel root)
     {
         root.Controls.Add(SectionTitle("Updates"));
@@ -485,6 +544,27 @@ internal sealed class SettingsForm : Form
     }
 
     private static ToggleSwitch MakeToggle() => new() { Margin = new Padding(0) };
+
+    // A small muted caption sitting just above a text field.
+    private static Label FieldCaption(string text) => new()
+    {
+        Text      = text,
+        AutoSize  = true,
+        ForeColor = Theme.Muted,
+        Margin    = new Padding(0, 2, 0, 2),
+    };
+
+    // A dark-themed single-line text box matching the rest of the settings surface.
+    private static TextBox MakeTextBox(string value) => new()
+    {
+        Text        = value,
+        Width       = ContentWidth,
+        BackColor   = Theme.ButtonBg,
+        ForeColor   = Theme.Fg,
+        BorderStyle = BorderStyle.FixedSingle,
+        Font        = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point),
+        Margin      = new Padding(0, 0, 0, 8),
+    };
 
     private static Label BodyText(string text) => new()
     {
