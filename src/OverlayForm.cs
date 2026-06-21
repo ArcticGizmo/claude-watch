@@ -121,6 +121,10 @@ internal sealed class OverlayForm : Form
     public event EventHandler? ExitRequested;
     public event Action<string>? SessionFocused;
 
+    /// <summary>Raised when the user picks "View history" for a session; carries that session's id so
+    /// the owning context can open the history viewer on it.</summary>
+    public event Action<string>? HistoryRequested;
+
     /// <summary>Raised when the user picks "Enable/Disable external notifications" for a session;
     /// carries that session's id for the context to flip its opt-in state.</summary>
     public event Action<string>? ExternalNotifyToggleRequested;
@@ -1219,6 +1223,15 @@ internal sealed class OverlayForm : Form
         var items = new List<(string Label, Action OnClick)>();
 
         int row = HitTestRow(clientPt);
+
+        // View history — on any session row (sub-agent rows resolve to their parent session, which
+        // owns the transcript). Listed first so it's the primary per-session action.
+        if (row >= 0)
+        {
+            var historySession = _rows[row].Session;
+            items.Add(("View history", () => HistoryRequested?.Invoke(historySession.SessionId)));
+        }
+
         if (row >= 0 && _rows[row].Session is { RemoteControlled: true } rc)
             items.Add(("Show QR code", () => ShowQrCode(rc)));
 
