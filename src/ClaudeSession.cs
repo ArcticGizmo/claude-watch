@@ -46,11 +46,19 @@ public record ClaudeSession(
     PermissionMode Mode = PermissionMode.Normal,
     IReadOnlyList<SubAgent>? SubAgents = null,
     string? Activity = null,
-    DateTime? RunningSince = null
+    DateTime? RunningSince = null,
+    string? BridgeSessionId = null
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
     public IReadOnlyList<SubAgent> SubAgents { get; init; } = SubAgents ?? [];
+
+    /// <summary>
+    /// True while this session is connected to the mobile app / claude.ai via /remote-control —
+    /// i.e. its session file carries a <c>bridgeSessionId</c>. That id is also the deep-link target
+    /// encoded into the QR code (https://claude.ai/code/{BridgeSessionId}).
+    /// </summary>
+    public bool RemoteControlled => !string.IsNullOrEmpty(BridgeSessionId);
 
     /// <summary>
     /// How long this session has been continuously running, as a compact label showing only the

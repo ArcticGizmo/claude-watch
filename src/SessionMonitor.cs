@@ -153,6 +153,13 @@ internal sealed class SessionMonitor : IDisposable
             var cwd = node["cwd"]?.GetValue<string>() ?? "";
             var updatedAtMs = node["updatedAt"]?.GetValue<long>() ?? 0;
 
+            // Remote Control marker: Claude Code adds a "bridgeSessionId" to the session file only
+            // while the session is connected to claude.ai/the mobile app via /remote-control. There is
+            // no other on-disk signal (the session URL/QR and client count never touch disk), so this
+            // field is the one thing we can observe. Its presence == remote control is active, and the
+            // value itself is the deep-link target we encode into the QR code.
+            var bridgeSessionId = node["bridgeSessionId"]?.GetValue<string>();
+
             var updatedAt =
                 updatedAtMs > 0
                     ? DateTimeOffset.FromUnixTimeMilliseconds(updatedAtMs).LocalDateTime
@@ -266,7 +273,8 @@ internal sealed class SessionMonitor : IDisposable
                 mode,
                 subAgents,
                 activity,
-                runningSince
+                runningSince,
+                bridgeSessionId
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))
