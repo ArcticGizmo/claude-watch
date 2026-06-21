@@ -1,3 +1,8 @@
+using Markdig;
+using Markdig.Extensions.Tables;
+using Markdig.Syntax;
+using Markdig.Syntax.Inlines;
+
 namespace ClaudeWatch;
 
 /// <summary>
@@ -20,6 +25,7 @@ internal sealed class HistoryViewerForm : Form
     private static readonly Color BodyBg   = Color.FromArgb(18, 18, 24);
     private static readonly Color ToolColor = Theme.Accent;
     private static readonly Color SubColor  = Color.FromArgb(56, 189, 248);
+    private static readonly Color CodeBg    = Color.FromArgb(32, 33, 46); // inline/fenced code highlight
 
     // ── Layout ────────────────────────────────────────────────────────────────
     private const int Grip       = 8;   // resize-grip / padding width around the whole window
@@ -49,6 +55,14 @@ internal sealed class HistoryViewerForm : Form
     private readonly Font _glyphFont   = new("Segoe UI", 11f, FontStyle.Regular, GraphicsUnit.Point);
 
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+
+    // Markdown rendering: a parser for assistant/user prose, plus on-demand font caches (markdown needs
+    // many size/style combinations — headers, bold, italic, strikethrough, links — so they're built lazily
+    // and reused rather than created per run).
+    private readonly MarkdownPipeline _pipeline =
+        new MarkdownPipelineBuilder().UsePipeTables().UseEmphasisExtras().Build();
+    private readonly Dictionary<(float, FontStyle), Font> _uiFonts = new();
+    private readonly Dictionary<float, Font> _monoFonts = new();
 
     private Rectangle _closeRect;
     private bool _closeHover;
@@ -362,13 +376,13 @@ internal sealed class HistoryViewerForm : Form
             case HistoryEventKind.UserText:
                 Append("\n" + indent, _uiFont);
                 Append(time + "You\n", Theme.Green, _boldFont);
-                Append(indent + ev.Detail + "\n", Theme.Fg, _uiFont);
+                RenderBody(ev.Detail, indent, ev.IsSidechain ? 24 : 0);
                 break;
 
             case HistoryEventKind.AssistantText:
                 Append("\n" + indent, _uiFont);
                 Append(time + (ev.IsSidechain ? "Sub-agent\n" : "Claude\n"), Theme.Accent, _boldFont);
-                Append(indent + ev.Detail + "\n", Theme.Fg, _uiFont);
+                RenderBody(ev.Detail, indent, ev.IsSidechain ? 24 : 0);
                 break;
 
             case HistoryEventKind.Thinking:
@@ -424,11 +438,327 @@ internal sealed class HistoryViewerForm : Form
         _body.SelectionLength = 0;
         _body.SelectionColor = color;
         _body.SelectionFont = font;
+        // Reset the paragraph/background formatting markdown rendering may have left behind, so plain
+        // runs (labels, tool lines, raw text) always render flat.
+        _body.SelectionBackColor = BodyBg;
+        _body.SelectionIndent = 0;
+        _body.SelectionHangingIndent = 0;
         _body.AppendText(text);
     }
 
     // Whitespace-only append (advances the caret to the end with the base font).
     private void Append(string text, Font font) => Append(text, Theme.Fg, font);
+
+    // ── Markdown rendering (Readable view only) ──────────────────────────────────
+    // Renders a user/assistant message body. In Raw view it stays verbatim; in Readable it's parsed
+    // as markdown and emitted as styled runs (headers, bold/italic, code, lists, links, tables).
+    private void RenderBody(string text, string indentText, int indentPx)
+    {
+        if (_raw)
+        {
+            Append(indentText + text + "\n", Theme.Fg, _uiFont);
+            return;
+        }
+        RenderMarkdown(text, indentPx);
+    }
+
+    private void RenderMarkdown(string md, int indentPx)
+    {
+        if (string.IsNullOrWhiteSpace(md)) { Append("\n", _uiFont); return; }
+
+        MarkdownDocument doc;
+        try { doc = Markdown.Parse(md, _pipeline); }
+        catch { Append(md.TrimEnd() + "\n", Theme.Fg, _uiFont); return; }
+
+        foreach (var block in doc)
+            RenderBlock(block, indentPx);
+    }
+
+    private void RenderBlock(Block block, int indentPx)
+    {
+        switch (block)
+        {
+            case HeadingBlock h:
+            {
+                float size = h.Level switch { 1 => 14f, 2 => 12.5f, 3 => 11.5f, _ => 10.5f };
+                SetPara(indentPx, 0);
+                Emit("\n", _uiFont, Theme.Fg);
+                if (h.Inline != null)
+                    RenderInlines(h.Inline, new MdStyle(size, true, false, false, false, Theme.Title));
+                Emit("\n", _uiFont, Theme.Fg);
+                break;
+            }
+
+            case ParagraphBlock p:
+                SetPara(indentPx, 0);
+                if (p.Inline != null)
+                    RenderInlines(p.Inline, DefaultStyle);
+                Emit("\n", _uiFont, Theme.Fg);
+                break;
+
+            case ListBlock list:
+                RenderList(list, indentPx);
+                break;
+
+            case QuoteBlock q:
+                foreach (var child in q)
+                    RenderBlock(child, indentPx + 18);
+                break;
+
+            case Table table:
+                RenderTable(table, indentPx);
+                break;
+
+            case FencedCodeBlock fc:
+                RenderCode(fc, indentPx);
+                break;
+
+            case CodeBlock code:
+                RenderCode(code, indentPx);
+                break;
+
+            case ThematicBreakBlock:
+                SetPara(indentPx, 0);
+                Emit(new string('─', 40) + "\n", _uiFont, Theme.Border);
+                break;
+
+            case HtmlBlock html:
+                SetPara(indentPx, 0);
+                Emit(html.Lines.ToString().Trim() + "\n", GetMono(9f), Theme.Muted);
+                break;
+
+            default:
+                if (block is ContainerBlock cb)
+                    foreach (var child in cb)
+                        RenderBlock(child, indentPx);
+                break;
+        }
+    }
+
+    private void RenderList(ListBlock list, int indentPx)
+    {
+        const int step = 20, hanging = 16;
+        int contentIndent = indentPx + step;
+        int number = list.OrderedStart != null && int.TryParse(list.OrderedStart, out var s) ? s : 1;
+
+        foreach (var itemObj in list)
+        {
+            if (itemObj is not ListItemBlock item) continue;
+            string bullet = list.IsOrdered ? $"{number}. " : "•  ";
+
+            SetPara(contentIndent, hanging);
+            Emit(bullet, _uiFont, Theme.Muted);
+
+            bool first = true;
+            foreach (var child in item)
+            {
+                if (child is ParagraphBlock p)
+                {
+                    if (!first) SetPara(contentIndent, hanging);
+                    if (p.Inline != null) RenderInlines(p.Inline, DefaultStyle);
+                    Emit("\n", _uiFont, Theme.Fg);
+                }
+                else if (child is ListBlock nested)
+                {
+                    RenderList(nested, contentIndent);
+                }
+                else
+                {
+                    RenderBlock(child, contentIndent + step);
+                }
+                first = false;
+            }
+            number++;
+        }
+    }
+
+    private void RenderCode(CodeBlock code, int indentPx)
+    {
+        var lines = code.Lines.ToString().Replace("\r", "").Split('\n').ToList();
+        while (lines.Count > 0 && lines[^1].Length == 0) lines.RemoveAt(lines.Count - 1);
+        if (lines.Count == 0) return;
+
+        int max = Math.Min(lines.Max(l => l.Length), 200);
+        SetPara(indentPx, 0);
+        Emit("\n", _uiFont, Theme.Fg);
+        foreach (var l in lines)
+            Emit("  " + l.PadRight(max) + "  \n", GetMono(9f), Theme.Fg, CodeBg);
+        Emit("\n", _uiFont, Theme.Fg);
+    }
+
+    private void RenderTable(Table table, int indentPx)
+    {
+        var rows = new List<List<string>>();
+        foreach (var rowObj in table)
+        {
+            if (rowObj is not TableRow row) continue;
+            var cells = new List<string>();
+            foreach (var cellObj in row)
+                if (cellObj is TableCell cell)
+                    cells.Add(CellText(cell));
+            rows.Add(cells);
+        }
+        if (rows.Count == 0) return;
+
+        int cols = rows.Max(r => r.Count);
+        var widths = new int[cols];
+        foreach (var r in rows)
+            for (int i = 0; i < r.Count; i++)
+                widths[i] = Math.Max(widths[i], r[i].Length);
+
+        SetPara(indentPx, 0);
+        Emit("\n", _uiFont, Theme.Fg);
+        for (int ri = 0; ri < rows.Count; ri++)
+        {
+            var r = rows[ri];
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < cols; i++)
+            {
+                sb.Append((i < r.Count ? r[i] : "").PadRight(widths[i]));
+                if (i < cols - 1) sb.Append("  |  ");
+            }
+            Emit(sb.ToString() + "\n", GetMono(9f), Theme.Fg);
+
+            if (ri == 0)
+            {
+                var sep = new System.Text.StringBuilder();
+                for (int i = 0; i < cols; i++)
+                {
+                    sep.Append(new string('─', widths[i]));
+                    if (i < cols - 1) sep.Append("──┼──");
+                }
+                Emit(sep.ToString() + "\n", GetMono(9f), Theme.Border);
+            }
+        }
+        Emit("\n", _uiFont, Theme.Fg);
+    }
+
+    private void RenderInlines(ContainerInline container, MdStyle style)
+    {
+        foreach (var inline in container)
+        {
+            switch (inline)
+            {
+                case LiteralInline lit:
+                    Emit(lit.Content.ToString(), FontFor(style), ColorFor(style));
+                    break;
+
+                case CodeInline code:
+                    Emit(code.Content, GetMono(9f), Theme.Fg, CodeBg);
+                    break;
+
+                case EmphasisInline em:
+                {
+                    var s = style;
+                    if (em.DelimiterChar == '~') s = s with { Strike = true };
+                    else if (em.DelimiterCount >= 2) s = s with { Bold = true };
+                    else s = s with { Italic = true };
+                    RenderInlines(em, s);
+                    break;
+                }
+
+                case LinkInline link:
+                    if (link.IsImage)
+                        Emit($"[image: {link.Url}]", FontFor(style with { Italic = true }), Theme.Muted);
+                    else
+                        RenderInlines(link, style with { Link = true });
+                    break;
+
+                case AutolinkInline auto:
+                    Emit(auto.Url, FontFor(style with { Link = true }), Theme.Accent);
+                    break;
+
+                case LineBreakInline br:
+                    Emit(br.IsHard ? "\n" : " ", _uiFont, Theme.Fg);
+                    break;
+
+                case HtmlInline html:
+                    Emit(html.Tag, GetMono(9f), Theme.Muted);
+                    break;
+
+                case ContainerInline cc:
+                    RenderInlines(cc, style);
+                    break;
+            }
+        }
+    }
+
+    private static string CellText(TableCell cell)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var b in cell)
+            if (b is LeafBlock { Inline: { } inline })
+                sb.Append(PlainText(inline));
+        return sb.ToString().Trim();
+    }
+
+    private static string PlainText(ContainerInline? container)
+    {
+        if (container == null) return "";
+        var sb = new System.Text.StringBuilder();
+        foreach (var inline in container)
+        {
+            switch (inline)
+            {
+                case LiteralInline lit: sb.Append(lit.Content.ToString()); break;
+                case CodeInline code: sb.Append(code.Content); break;
+                case LineBreakInline: sb.Append(' '); break;
+                case ContainerInline cc: sb.Append(PlainText(cc)); break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    // Emits a styled run without touching paragraph formatting (the block sets indent up front; inline
+    // runs only change colour/font/background).
+    private void Emit(string text, Font font, Color color, Color? back = null)
+    {
+        _body.SelectionStart = _body.TextLength;
+        _body.SelectionLength = 0;
+        _body.SelectionColor = color;
+        _body.SelectionFont = font;
+        _body.SelectionBackColor = back ?? BodyBg;
+        _body.AppendText(text);
+    }
+
+    private void SetPara(int indentPx, int hangingPx)
+    {
+        _body.SelectionStart = _body.TextLength;
+        _body.SelectionLength = 0;
+        _body.SelectionIndent = indentPx;
+        _body.SelectionHangingIndent = hangingPx;
+    }
+
+    private static readonly MdStyle DefaultStyle = new(9.5f, false, false, false, false, null);
+
+    private readonly record struct MdStyle(
+        float Size, bool Bold, bool Italic, bool Strike, bool Link, Color? Color);
+
+    private Font FontFor(MdStyle s)
+    {
+        FontStyle fs = FontStyle.Regular;
+        if (s.Bold) fs |= FontStyle.Bold;
+        if (s.Italic) fs |= FontStyle.Italic;
+        if (s.Strike) fs |= FontStyle.Strikeout;
+        if (s.Link) fs |= FontStyle.Underline;
+        return GetFont(s.Size, fs);
+    }
+
+    private static Color ColorFor(MdStyle s) => s.Link ? Theme.Accent : (s.Color ?? Theme.Fg);
+
+    private Font GetFont(float size, FontStyle style)
+    {
+        if (!_uiFonts.TryGetValue((size, style), out var f))
+            _uiFonts[(size, style)] = f = new Font("Segoe UI", size, style, GraphicsUnit.Point);
+        return f;
+    }
+
+    private Font GetMono(float size)
+    {
+        if (!_monoFonts.TryGetValue(size, out var f))
+            _monoFonts[size] = f = new Font("Consolas", size, FontStyle.Regular, GraphicsUnit.Point);
+        return f;
+    }
 
     private void BeginUpdate() => NativeMethods.SendMessage(_body.Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
 
@@ -770,6 +1100,8 @@ internal sealed class HistoryViewerForm : Form
             _smallFont.Dispose();
             _titleFont.Dispose();
             _glyphFont.Dispose();
+            foreach (var f in _uiFonts.Values) f.Dispose();
+            foreach (var f in _monoFonts.Values) f.Dispose();
             _icon?.Dispose();
         }
         base.Dispose(disposing);
