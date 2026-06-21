@@ -12,9 +12,9 @@ using System.Diagnostics;
 /// </summary>
 internal sealed class SettingsForm : Form
 {
-    // Inner content width (~50% wider than the original 372). The client is sized to fit this
-    // plus the 16px padding either side and room for a vertical scrollbar, so nothing clips.
-    private const int ContentWidth = 552;
+    // Inner content width. The client is sized to fit this plus the 16px padding either side and
+    // room for a vertical scrollbar, so nothing clips.
+    private const int ContentWidth = 607;
 
     private readonly AppSettings   _settings;
     private readonly PluginManager _pluginManager;
@@ -80,7 +80,7 @@ internal sealed class SettingsForm : Form
         BackColor       = Theme.FormBg;
         ForeColor       = Theme.Fg;
         Font            = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        ClientSize      = new Size(ContentWidth + 50, 780);
+        ClientSize      = new Size(ContentWidth + 50, 858);
         if (_icon != null)
             Icon = Icon.FromHandle(_icon.GetHicon());
 
@@ -400,9 +400,11 @@ internal sealed class SettingsForm : Form
         _ntfyTopicBox.Leave       += (_, _) => _settings.Save();
 
         var genBtn = MakeButton("Generate");
-        genBtn.AutoSize = false;
-        genBtn.Size     = new Size(86, 24);
-        genBtn.Margin   = new Padding(0, 0, 8, 0);
+        genBtn.AutoSize  = false;
+        genBtn.Size      = new Size(86, 24);
+        genBtn.Margin    = new Padding(0, 0, 8, 0);
+        genBtn.Padding   = new Padding(0);
+        genBtn.TextAlign = ContentAlignment.MiddleCenter;
         genBtn.Click += (_, _) =>
         {
             _ntfyTopicBox.Text = GenerateTopic();   // raises TextChanged -> updates _settings.NtfyTopic
@@ -410,9 +412,11 @@ internal sealed class SettingsForm : Form
         };
 
         var qrBtn = MakeButton("QR code");
-        qrBtn.AutoSize = false;
-        qrBtn.Size     = new Size(78, 24);
-        qrBtn.Margin   = new Padding(0);
+        qrBtn.AutoSize  = false;
+        qrBtn.Size      = new Size(78, 24);
+        qrBtn.Margin    = new Padding(0);
+        qrBtn.Padding   = new Padding(0);
+        qrBtn.TextAlign = ContentAlignment.MiddleCenter;
         qrBtn.Click += (_, _) => ShowTopicQr();
 
         topicRow.Controls.Add(_ntfyTopicBox);
