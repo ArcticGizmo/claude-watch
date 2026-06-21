@@ -7,11 +7,6 @@
       "name": "permission-monitor",
       "source": "./plugins/permission-monitor",
       "description": "Writes each session's live permission mode to ~/.claude/sessions/{id}.mode for claude-watch."
-    },
-    {
-      "name": "claude-watch",
-      "source": "./plugins/claude-watch",
-      "description": "Slash commands to control claude-watch from a session: /afk toggles external notifications, /history opens the history panel."
     }
   ]
 }

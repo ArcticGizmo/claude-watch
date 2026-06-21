@@ -38,13 +38,6 @@ internal sealed class SessionMonitor : IDisposable
     public event Action<ClaudeSession>? AwaitingInput;
 
     /// <summary>
-    /// Raised when a session asks (via the watch-control plugin's <c>/history</c> command, which drops
-    /// a one-shot <c>{sessionId}.history</c> trigger file) to open the history viewer on that session.
-    /// Fired from <see cref="Scan"/>, i.e. already on the UI thread.
-    /// </summary>
-    public event Action<string>? OpenHistoryRequested;
-
-    /// <summary>
     /// Raised (on a thread-pool thread) whenever something happened that warrants a re-scan:
     /// a session file changed, a tracked process exited, or the watcher dropped events.
     /// The owner is responsible for marshaling <see cref="Scan"/> onto the UI thread.
@@ -111,10 +104,6 @@ internal sealed class SessionMonitor : IDisposable
         NextNeedsAttentionDeadline = ComputeNextDeadline(sessions);
 
         SessionsChanged?.Invoke(sessions);
-
-        // Consume any one-shot /history triggers after the subscribers have refreshed their view of
-        // the live sessions, so a freshly-opened viewer lands on the right (now-current) session.
-        ProcessHistoryRequests();
         return sessions;
     }
 
@@ -251,11 +240,6 @@ internal sealed class SessionMonitor : IDisposable
 
             var mode = ReadPermissionMode(Path.Combine(_sessionsDir, $"{sessionId}.mode"));
 
-            // The watch-control plugin's /afk command writes a {sessionId}.afk marker to opt this
-            // session into external (ntfy) notifications; its mere presence is the signal.
-            var afkNotify = !string.IsNullOrEmpty(sessionId)
-                && File.Exists(Path.Combine(_sessionsDir, $"{sessionId}.afk"));
-
             // Track the start of the current continuous Running stretch so the overlay can show
             // elapsed run time; reset the moment the session stops running.
             DateTime? runningSince;
@@ -290,8 +274,7 @@ internal sealed class SessionMonitor : IDisposable
                 subAgents,
                 activity,
                 runningSince,
-                bridgeSessionId,
-                afkNotify
+                bridgeSessionId
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))
@@ -305,30 +288,6 @@ internal sealed class SessionMonitor : IDisposable
         catch
         {
             return null;
-        }
-    }
-
-    // Consumes one-shot {sessionId}.history trigger files dropped by the watch-control plugin: each is
-    // deleted (so it fires exactly once) and turned into an OpenHistoryRequested event. Deleting the
-    // file re-fires the watcher, but the next Scan finds nothing to do, so it settles immediately.
-    private void ProcessHistoryRequests()
-    {
-        string[] files;
-        try
-        {
-            files = Directory.GetFiles(_sessionsDir, "*.history");
-        }
-        catch
-        {
-            return;
-        }
-
-        foreach (var file in files)
-        {
-            var sessionId = Path.GetFileNameWithoutExtension(file);
-            try { File.Delete(file); } catch { }
-            if (!string.IsNullOrEmpty(sessionId))
-                OpenHistoryRequested?.Invoke(sessionId);
         }
     }
 
