@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Markdig;
 using Markdig.Extensions.Tables;
 using Markdig.Syntax;
@@ -95,8 +96,15 @@ internal sealed class HistoryViewerForm : Form
     private readonly HashSet<string> _expanded = new();
     // Character ranges of each clickable tool-summary line in the current readable render.
     private readonly List<(int start, int end, string key)> _toolRanges = new();
-    // Character ranges of clickable markdown links (incl. images) and the URL each opens.
-    private readonly List<(int start, int end, string url)> _linkRanges = new();
+    // Character ranges of clickable spans (links, image paths, pasted images) and what each does when
+    // clicked — a URL/path open, or (for inline base64 images) decode-to-temp-file-and-open.
+    private readonly List<(int start, int end, Action action)> _linkRanges = new();
+
+    // Absolute Windows or Unix paths ending in an image extension, linkified inside prose so the
+    // "[Image: source: C:\…\foo.png]" references Claude Code emits are clickable.
+    private static readonly Regex ImagePathRegex = new(
+        @"(?:[A-Za-z]:\\|/)[^\s""'<>|?*]+\.(?:png|jpe?g|gif|webp|bmp|svg)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private int _renderedCount;
 
     private readonly FileSystemWatcher _watcher;
@@ -456,6 +464,10 @@ internal sealed class HistoryViewerForm : Form
                 RenderToolCall(ev, indent, time);
                 break;
 
+            case HistoryEventKind.Image:
+                RenderImage(ev, indent, time);
+                break;
+
             case HistoryEventKind.Meta:
                 Append("\n" + indent, _uiFont);
                 Append(time + ev.Summary + "\n", Theme.Muted, _smallFont);
@@ -490,6 +502,28 @@ internal sealed class HistoryViewerForm : Form
                 Append(indent + "  result:\n", Theme.Muted, _smallFont);
                 Append(Indented(result, indent + "  ") + "\n", Theme.Muted, _monoFont);
             }
+        }
+    }
+
+    private void RenderImage(HistoryEvent ev, string indent, string time)
+    {
+        Append(indent, _uiFont);
+        string media = ev.ImageMedia ?? "image";
+        int start = _body.TextLength;
+        Emit(time + $"🖼 View image ({media})", FontFor(DefaultStyle with { Link = true }), Theme.Accent);
+        int end = _body.TextLength;
+        Append("\n", _uiFont);
+
+        if (!string.IsNullOrEmpty(ev.ImageUrl))
+        {
+            var url = ev.ImageUrl!;
+            _linkRanges.Add((start, end, () => OpenUrl(url)));
+        }
+        else if (!string.IsNullOrEmpty(ev.ImageData))
+        {
+            var data = ev.ImageData!;
+            var m = media;
+            _linkRanges.Add((start, end, () => OpenImageData(data, m)));
         }
     }
 
@@ -701,7 +735,7 @@ internal sealed class HistoryViewerForm : Form
             switch (inline)
             {
                 case LiteralInline lit:
-                    Emit(lit.Content.ToString(), FontFor(style), ColorFor(style));
+                    EmitText(lit.Content.ToString(), style);
                     break;
 
                 case CodeInline code:
@@ -726,7 +760,10 @@ internal sealed class HistoryViewerForm : Form
                     else
                         RenderInlines(link, style with { Link = true });
                     if (!string.IsNullOrEmpty(link.Url))
-                        _linkRanges.Add((start, _body.TextLength, link.Url!));
+                    {
+                        var u = link.Url!;
+                        _linkRanges.Add((start, _body.TextLength, () => OpenUrl(u)));
+                    }
                     break;
                 }
 
@@ -735,7 +772,10 @@ internal sealed class HistoryViewerForm : Form
                     int start = _body.TextLength;
                     Emit(auto.Url, FontFor(style with { Link = true }), Theme.Accent);
                     if (!string.IsNullOrEmpty(auto.Url))
-                        _linkRanges.Add((start, _body.TextLength, auto.Url));
+                    {
+                        var u = auto.Url;
+                        _linkRanges.Add((start, _body.TextLength, () => OpenUrl(u)));
+                    }
                     break;
                 }
 
@@ -759,6 +799,26 @@ internal sealed class HistoryViewerForm : Form
     {
         var alt = PlainText(link).Trim();
         return string.IsNullOrEmpty(alt) ? (link.Url ?? "image") : alt;
+    }
+
+    // Emits literal prose, turning any absolute image path it contains into a clickable link.
+    private void EmitText(string text, MdStyle style)
+    {
+        int pos = 0;
+        foreach (Match m in ImagePathRegex.Matches(text))
+        {
+            if (m.Index > pos)
+                Emit(text[pos..m.Index], FontFor(style), ColorFor(style));
+
+            int start = _body.TextLength;
+            Emit(m.Value, FontFor(style with { Link = true }), Theme.Accent);
+            var path = m.Value;
+            _linkRanges.Add((start, _body.TextLength, () => OpenUrl(path)));
+
+            pos = m.Index + m.Length;
+        }
+        if (pos < text.Length)
+            Emit(text[pos..], FontFor(style), ColorFor(style));
     }
 
     private static string CellText(TableCell cell)
@@ -881,16 +941,18 @@ internal sealed class HistoryViewerForm : Form
     // ── Expand / collapse a tool call ────────────────────────────────────────────
     private void OnBodyMouseUp(object? sender, MouseEventArgs e)
     {
-        if (_raw || e.Button != MouseButtons.Left) return;
+        if (e.Button != MouseButtons.Left) return;
         if (_body.SelectionLength > 0) return; // a text selection, not a click
 
         int idx = _body.GetCharIndexFromPosition(e.Location);
 
-        // A markdown link (or image) opens in the default handler.
-        foreach (var (start, end, url) in _linkRanges)
+        // Links / image references / pasted images open — in both views.
+        foreach (var (start, end, action) in _linkRanges)
         {
-            if (idx >= start && idx < end) { OpenUrl(url); return; }
+            if (idx >= start && idx < end) { action(); return; }
         }
+
+        if (_raw) return; // tool expand/collapse is a Readable-only affordance
 
         // A tool-summary line toggles its detail, keeping the clicked line in view.
         foreach (var (start, end, key) in _toolRanges)
@@ -906,12 +968,11 @@ internal sealed class HistoryViewerForm : Form
 
     private void OnBodyMouseMove(object? sender, MouseEventArgs e)
     {
-        if (_raw) { return; }
         int idx = _body.GetCharIndexFromPosition(e.Location);
         bool clickable = false;
         foreach (var (start, end, _) in _linkRanges)
             if (idx >= start && idx < end) { clickable = true; break; }
-        if (!clickable)
+        if (!clickable && !_raw)
             foreach (var (start, end, _) in _toolRanges)
                 if (idx >= start && idx < end) { clickable = true; break; }
         _body.Cursor = clickable ? Cursors.Hand : Cursors.IBeam;
@@ -921,6 +982,28 @@ internal sealed class HistoryViewerForm : Form
     {
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
         catch { /* no handler / blocked path — nothing useful to do */ }
+    }
+
+    // Decodes an inline base64 image to a temp file and opens it in the default viewer.
+    private static void OpenImageData(string base64, string media)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(base64);
+            string ext = media switch
+            {
+                "image/png"  => ".png",
+                "image/jpeg" => ".jpg",
+                "image/gif"  => ".gif",
+                "image/webp" => ".webp",
+                "image/bmp"  => ".bmp",
+                _            => ".png",
+            };
+            var path = Path.Combine(Path.GetTempPath(), $"claudewatch-img-{Guid.NewGuid():N}{ext}");
+            File.WriteAllBytes(path, bytes);
+            OpenUrl(path);
+        }
+        catch { /* malformed data — nothing to open */ }
     }
 
     // ── View / follow toggles ────────────────────────────────────────────────────

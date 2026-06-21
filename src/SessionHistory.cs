@@ -11,7 +11,8 @@ internal enum HistoryEventKind
     AssistantText,
     Thinking,
     ToolCall,
-    Meta, // summaries / unknown record types — shown only in the raw view
+    Image, // a pasted/attached image (base64 inline data, or a url source)
+    Meta,  // summaries / unknown record types — shown only in the raw view
 }
 
 /// <summary>
@@ -35,6 +36,11 @@ internal sealed class HistoryEvent
 
     /// <summary>Stable key for tracking expand/collapse state across re-renders.</summary>
     public string Key { get; init; } = "";
+
+    // Image events only: the media type plus exactly one of a url source or inline base64 data.
+    public string? ImageMedia { get; set; }
+    public string? ImageUrl { get; set; }
+    public string? ImageData { get; set; }
 }
 
 /// <summary>What a single <see cref="TranscriptParser.Ingest"/> pass changed, so the UI can render
@@ -239,6 +245,24 @@ internal sealed class TranscriptParser
                         _pendingTools[id] = ev;
                         _toolIndex[id] = Events.Count - 1;
                     }
+                    break;
+                }
+                case "image":
+                {
+                    var source = block!["source"];
+                    var stype = source?["type"]?.GetValue<string>();
+                    var media = source?["media_type"]?.GetValue<string>() ?? "image";
+                    Add(new HistoryEvent
+                    {
+                        Kind = HistoryEventKind.Image,
+                        Timestamp = ts,
+                        IsSidechain = sidechain,
+                        ImageMedia = media,
+                        ImageUrl = stype == "url" ? source?["url"]?.GetValue<string>() : null,
+                        ImageData = stype == "base64" ? source?["data"]?.GetValue<string>() : null,
+                        Summary = $"image ({media})",
+                        Key = $"e{Events.Count}",
+                    });
                     break;
                 }
                 case "tool_result":
