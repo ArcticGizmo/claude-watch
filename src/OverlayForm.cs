@@ -165,8 +165,6 @@ internal sealed class OverlayForm : Form
                 _denseCloseTimer.Stop();
         };
 
-        ContextMenuStrip = BuildContextMenu();
-
         // If a monitor is added or removed, re-evaluate the dense docking; DenseScreen() resets to
         // the primary screen when the monitor we were pinned to has disappeared.
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
@@ -1048,6 +1046,13 @@ internal sealed class OverlayForm : Form
             PinToActiveDropZone();
         HideDropZones();
 
+        if (e.Button == MouseButtons.Right)
+        {
+            ShowContextMenuAt(e.Location);
+            base.OnMouseUp(e);
+            return;
+        }
+
         if (e.Button == MouseButtons.Left && !wasDrag)
         {
             bool headerVisible = !(_dense && !_denseOpen);
@@ -1138,35 +1143,33 @@ internal sealed class OverlayForm : Form
     }
 
     // ── Context menu ─────────────────────────────────────────────────────────
-    // The session under the cursor when the context menu opened, if it is being remote-controlled.
-    // Captured on Opening because the cursor has usually moved by the time an item is clicked.
-    private ClaudeSession? _qrMenuSession;
+    // We use our own lightweight popover (PopoverMenu) rather than a WinForms ContextMenuStrip:
+    // the strip wouldn't reliably display from this transparent, top-most tool window.
+    private PopoverMenu? _popover;
     private QrCodeForm? _qrForm;
 
-    private ContextMenuStrip BuildContextMenu()
+    // Opens the context menu at a right-clicked point, with each item scoped to that location: Exit
+    // only over the header, "Show QR code" only over a remote-controlled session row. If neither
+    // applies, no menu is shown.
+    private void ShowContextMenuAt(Point clientPt)
     {
-        var menu = new ContextMenuStrip();
+        var items = new List<(string Label, Action OnClick)>();
 
-        var qr = new ToolStripMenuItem("Show QR code");
-        qr.Click += (_, _) => { if (_qrMenuSession is { } s) ShowQrCode(s); };
-        var sep = new ToolStripSeparator();
+        int row = HitTestRow(clientPt);
+        if (row >= 0 && _rows[row].Session is { RemoteControlled: true } rc)
+            items.Add(("Show QR code", () => ShowQrCode(rc)));
 
-        var exit = new ToolStripMenuItem("Exit Claude Watch");
-        exit.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
+        bool headerVisible = !(_dense && !_denseOpen);
+        bool overHeader = headerVisible && clientPt.Y >= 0 && clientPt.Y < HeaderHeight;
+        if (overHeader)
+            items.Add(("Exit Claude Watch", () => ExitRequested?.Invoke(this, EventArgs.Empty)));
 
-        menu.Items.AddRange(new ToolStripItem[] { qr, sep, exit });
+        if (items.Count == 0) return;
 
-        // Offer the QR item only when the menu opens over a remote-controlled session row.
-        menu.Opening += (_, _) =>
-        {
-            int row = HitTestRow(PointToClient(Cursor.Position));
-            var session = row >= 0 ? _rows[row].Session : null;
-            _qrMenuSession = session is { RemoteControlled: true } ? session : null;
-            qr.Visible  = _qrMenuSession != null;
-            sep.Visible = _qrMenuSession != null;
-        };
-
-        return menu;
+        _popover?.Close();
+        _popover = new PopoverMenu(items);
+        _popover.FormClosed += (_, _) => _popover = null;
+        _popover.ShowAt(PointToScreen(clientPt));
     }
 
     // Pops a centered QR card encoding the session's remote-control deep link. Only one is shown at
@@ -1242,6 +1245,7 @@ internal sealed class OverlayForm : Form
             _usageHoverTimer.Dispose();
             _denseCloseTimer.Dispose();
             _usageTooltip.Dispose();
+            _popover?.Dispose();
             _qrForm?.Dispose();
             _icon?.Dispose();
         }

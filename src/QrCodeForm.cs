@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using QRCoder;
@@ -7,8 +8,9 @@ namespace ClaudeWatch;
 /// <summary>
 /// A small always-on-top card, centered on screen, showing the remote-control deep-link QR code for
 /// one session. Encodes https://claude.ai/code/{bridgeSessionId} — scanning it from the Claude mobile
-/// app joins the session, mirroring what /remote-control surfaces in the terminal. Dismissed via the
-/// ✕ glyph, the Close button, Esc, or by clicking away (deactivation).
+/// app joins the session, mirroring what /remote-control surfaces in the terminal. The link is also
+/// clickable (opens in the default browser) and copyable. Dismissed via the ✕ glyph, the Close
+/// button, Esc, or by clicking away (deactivation).
 /// </summary>
 internal sealed class QrCodeForm : Form
 {
@@ -30,6 +32,8 @@ internal sealed class QrCodeForm : Form
     private const int TitleH  = 24;
     private const int UrlH    = 18;
     private const int BtnH    = 32;
+    private const int BtnW    = 96;
+    private const int BtnGap  = 10;
 
     private readonly Bitmap _qr;
     private readonly string _title;
@@ -37,9 +41,18 @@ internal sealed class QrCodeForm : Form
 
     private Rectangle _cardRect;
     private Rectangle _closeIconRect;
+    private Rectangle _urlRect;
+    private Rectangle _copyBtnRect;
     private Rectangle _closeBtnRect;
+
     private bool _closeIconHover;
+    private bool _urlHover;
+    private bool _copyBtnHover;
     private bool _closeBtnHover;
+
+    // Briefly flips the Copy button's label to "Copied!" after a successful copy.
+    private bool _copied;
+    private readonly System.Windows.Forms.Timer _copiedTimer;
 
     public QrCodeForm(string title, string url)
     {
@@ -55,6 +68,9 @@ internal sealed class QrCodeForm : Form
         BackColor       = BgColor;
         StartPosition   = FormStartPosition.Manual;
 
+        _copiedTimer = new System.Windows.Forms.Timer { Interval = 1300 };
+        _copiedTimer.Tick += (_, _) => { _copiedTimer.Stop(); _copied = false; Invalidate(); };
+
         int cardSide = QrSize + QrQuiet * 2;
 
         // Width must also accommodate the (potentially long) URL line — measure it against an
@@ -64,7 +80,8 @@ internal sealed class QrCodeForm : Form
         using (var urlFont = new Font("Segoe UI", 8f, GraphicsUnit.Point))
             urlWidth = probe.MeasureString(_url, urlFont).Width;
 
-        int contentW = Math.Max(cardSide, (int)Math.Ceiling(urlWidth));
+        int urlW     = (int)Math.Ceiling(urlWidth);
+        int contentW = Math.Max(cardSide, urlW);
         int w = Pad * 2 + contentW;
         int h = Pad + TitleH + Gap + cardSide + Gap + UrlH + Gap + BtnH + Pad;
         ClientSize = new Size(w, h);
@@ -75,8 +92,15 @@ internal sealed class QrCodeForm : Form
 
         _closeIconRect = new Rectangle(w - Pad - 16, Pad - 2, 16, 16);
 
-        int btnW = 96;
-        _closeBtnRect = new Rectangle((w - btnW) / 2, h - Pad - BtnH, btnW, BtnH);
+        int urlTop = _cardRect.Bottom + Gap;
+        _urlRect = new Rectangle((w - urlW) / 2, urlTop, urlW, UrlH);
+
+        // Two buttons centered as a pair: Copy link | Close.
+        int pairW  = BtnW * 2 + BtnGap;
+        int startX = (w - pairW) / 2;
+        int btnY   = h - Pad - BtnH;
+        _copyBtnRect  = new Rectangle(startX,                btnY, BtnW, BtnH);
+        _closeBtnRect = new Rectangle(startX + BtnW + BtnGap, btnY, BtnW, BtnH);
     }
 
     /// <summary>Centers the card on the given screen's working area.</summary>
@@ -126,10 +150,10 @@ internal sealed class QrCodeForm : Form
             g.DrawPath(pen, path);
         }
 
-        using var titleFont = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
-        using var urlFont   = new Font("Segoe UI", 8f,                  GraphicsUnit.Point);
-        using var iconFont  = new Font("Segoe UI", 9f,                  GraphicsUnit.Point);
-        using var btnFont   = new Font("Segoe UI", 8.5f,                GraphicsUnit.Point);
+        using var titleFont = new Font("Segoe UI", 10f, FontStyle.Bold,      GraphicsUnit.Point);
+        using var urlFont   = new Font("Segoe UI", 8f,  FontStyle.Underline, GraphicsUnit.Point);
+        using var iconFont  = new Font("Segoe UI", 9f,                       GraphicsUnit.Point);
+        using var btnFont   = new Font("Segoe UI", 8.5f,                     GraphicsUnit.Point);
 
         var center = new StringFormat
         {
@@ -153,37 +177,46 @@ internal sealed class QrCodeForm : Form
             new Rectangle(_cardRect.X + QrQuiet, _cardRect.Y + QrQuiet, QrSize, QrSize));
         g.PixelOffsetMode = PixelOffsetMode.Default;
 
-        // URL line, dimmed.
-        int urlTop = _cardRect.Bottom + Gap;
-        using (var muted = new SolidBrush(MutedColor))
-            g.DrawString(_url, urlFont, muted,
-                new RectangleF(Pad, urlTop, ClientSize.Width - Pad * 2, UrlH), center);
+        // URL line — an underlined link that opens in the browser, brightening on hover.
+        using (var urlBrush = new SolidBrush(_urlHover ? FgColor : RemoteColor))
+            g.DrawString(_url, urlFont, urlBrush, _urlRect, center);
 
         // ✕ close glyph, top-right.
         using (var iconBrush = new SolidBrush(_closeIconHover ? FgColor : MutedColor))
             g.DrawString("✕", iconFont, iconBrush, _closeIconRect, center);
 
-        // Close button.
-        using (var btnPath = RoundedRect(_closeBtnRect, 6))
+        // Buttons.
+        DrawButton(g, _copyBtnRect, _copied ? "Copied!" : "Copy link", _copyBtnHover, btnFont, center);
+        DrawButton(g, _closeBtnRect, "Close", _closeBtnHover, btnFont, center);
+    }
+
+    private static void DrawButton(Graphics g, Rectangle r, string text, bool hover, Font font, StringFormat fmt)
+    {
+        using (var path = RoundedRect(r, 6))
         {
-            using var btnBg = new SolidBrush(_closeBtnHover ? BtnHoverCol : BtnColor);
-            g.FillPath(btnBg, btnPath);
-            using var btnBorder = new Pen(BorderColor, 1f);
-            g.DrawPath(btnBorder, btnPath);
+            using var bg = new SolidBrush(hover ? BtnHoverCol : BtnColor);
+            g.FillPath(bg, path);
+            using var border = new Pen(BorderColor, 1f);
+            g.DrawPath(border, path);
         }
-        using (var btnText = new SolidBrush(_closeBtnHover ? FgColor : RemoteColor))
-            g.DrawString("Close", btnFont, btnText, _closeBtnRect, center);
+        using var textBrush = new SolidBrush(hover ? FgColor : RemoteColor);
+        g.DrawString(text, font, textBrush, r, fmt);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         bool icon = _closeIconRect.Contains(e.Location);
+        bool url  = _urlRect.Contains(e.Location);
+        bool copy = _copyBtnRect.Contains(e.Location);
         bool btn  = _closeBtnRect.Contains(e.Location);
-        if (icon != _closeIconHover || btn != _closeBtnHover)
+
+        if (icon != _closeIconHover || url != _urlHover || copy != _copyBtnHover || btn != _closeBtnHover)
         {
             _closeIconHover = icon;
+            _urlHover       = url;
+            _copyBtnHover   = copy;
             _closeBtnHover  = btn;
-            Cursor = (icon || btn) ? Cursors.Hand : Cursors.Default;
+            Cursor = (icon || url || copy || btn) ? Cursors.Hand : Cursors.Default;
             Invalidate();
         }
         base.OnMouseMove(e);
@@ -191,10 +224,35 @@ internal sealed class QrCodeForm : Form
 
     protected override void OnMouseClick(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left &&
-            (_closeIconRect.Contains(e.Location) || _closeBtnRect.Contains(e.Location)))
-            Close();
+        if (e.Button == MouseButtons.Left)
+        {
+            if (_closeIconRect.Contains(e.Location) || _closeBtnRect.Contains(e.Location))
+                Close();
+            else if (_urlRect.Contains(e.Location))
+                OpenLink();
+            else if (_copyBtnRect.Contains(e.Location))
+                CopyLink();
+        }
         base.OnMouseClick(e);
+    }
+
+    private void OpenLink()
+    {
+        try { Process.Start(new ProcessStartInfo(_url) { UseShellExecute = true }); }
+        catch { /* no browser / blocked — nothing useful to do but stay open */ }
+    }
+
+    private void CopyLink()
+    {
+        try
+        {
+            Clipboard.SetText(_url);
+            _copied = true;
+            _copiedTimer.Stop();
+            _copiedTimer.Start();
+            Invalidate();
+        }
+        catch { /* clipboard contention — leave the label unchanged */ }
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -229,7 +287,10 @@ internal sealed class QrCodeForm : Form
     protected override void Dispose(bool disposing)
     {
         if (disposing)
+        {
+            _copiedTimer.Dispose();
             _qr.Dispose();
+        }
         base.Dispose(disposing);
     }
 }
