@@ -34,6 +34,11 @@ internal sealed class SettingsForm : Form
     private UsageBarsControl _usageBars   = null!;
     private Button           _usageRefreshBtn = null!;
 
+    // Notifications section. The master toggle gates the per-type sub-rows (toggle + Test button),
+    // which dim while it's off.
+    private ToggleSwitch _notifyMasterToggle = null!;
+    private readonly List<(Label label, ToggleSwitch toggle, Button test)> _notifySubRows = new();
+
     private UsageInfo _usage;
 
     private FlowLayoutPanel _root = null!;
@@ -43,6 +48,9 @@ internal sealed class SettingsForm : Form
 
     /// <summary>Raised when the user clicks "Check for Updates".</summary>
     public event EventHandler? CheckForUpdatesRequested;
+
+    /// <summary>Raised when the user clicks a per-type "Test" button, to preview that notification.</summary>
+    public event Action<NotificationKind>? TestNotificationRequested;
 
     public SettingsForm(AppSettings settings, PluginManager pluginManager,
                         UsageMonitor usageMonitor, UsageInfo currentUsage)
@@ -59,7 +67,7 @@ internal sealed class SettingsForm : Form
         BackColor       = Theme.FormBg;
         ForeColor       = Theme.Fg;
         Font            = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        ClientSize      = new Size(ContentWidth + 50, 660);
+        ClientSize      = new Size(ContentWidth + 50, 780);
         if (_icon != null)
             Icon = Icon.FromHandle(_icon.GetHicon());
 
@@ -98,6 +106,8 @@ internal sealed class SettingsForm : Form
         BuildPermissionSection(root);
         root.Controls.Add(Separator());
         BuildUsageSection(root);
+        root.Controls.Add(Separator());
+        BuildNotificationsSection(root);
         root.Controls.Add(Separator());
         BuildUpdatesSection(root);
 
@@ -236,6 +246,92 @@ internal sealed class SettingsForm : Form
         };
         row.Controls.Add(_usageRefreshBtn);
         root.Controls.Add(row);
+    }
+
+    private void BuildNotificationsSection(FlowLayoutPanel root)
+    {
+        _notifyMasterToggle = MakeToggle();
+        _notifyMasterToggle.Checked = _settings.NotificationsEnabled;
+        _notifyMasterToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.NotificationsEnabled = _notifyMasterToggle.Checked;
+            _settings.Save();
+            ApplyNotifyEnabled();
+        };
+        root.Controls.Add(TitleRow("Notifications", _notifyMasterToggle));
+
+        root.Controls.Add(BodyText(
+            "Windows desktop notifications when a session needs you. Turn the whole feature off, " +
+            "or just the types you don't want. Use Test to preview one."));
+
+        root.Controls.Add(BuildNotifyRow(
+            "Done — a session finished working",
+            _settings.NotifyOnDone,
+            v => { _settings.NotifyOnDone = v; _settings.Save(); },
+            NotificationKind.Done));
+
+        root.Controls.Add(BuildNotifyRow(
+            "Waiting for input — a session is blocked on a prompt",
+            _settings.NotifyOnWaitingInput,
+            v => { _settings.NotifyOnWaitingInput = v; _settings.Save(); },
+            NotificationKind.WaitingForInput));
+
+        ApplyNotifyEnabled();
+    }
+
+    // An indented sub-row for one notification type: a label, a "Test" button, and a toggle on the
+    // right. The trio is tracked so ApplyNotifyEnabled can dim it when the master switch is off.
+    private Panel BuildNotifyRow(string text, bool initial, Action<bool> onChanged, NotificationKind kind)
+    {
+        var row = new Panel
+        {
+            Width  = ContentWidth,
+            Height = 30,
+            Margin = new Padding(0, 2, 0, 4),
+        };
+
+        var label = new Label
+        {
+            Text      = text,
+            AutoSize  = true,
+            ForeColor = Theme.Fg,
+            Location  = new Point(16, 7),
+        };
+
+        var toggle = MakeToggle();
+        toggle.Checked  = initial;
+        toggle.CheckedChanged += (_, _) => onChanged(toggle.Checked);
+        toggle.Location = new Point(ContentWidth - toggle.Width, (row.Height - toggle.Height) / 2);
+        toggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+
+        var test = MakeButton("Test");
+        test.AutoSize  = false;
+        test.Size      = new Size(56, 24);
+        test.Margin    = new Padding(0);
+        test.Padding   = new Padding(0);
+        test.TextAlign = ContentAlignment.MiddleCenter;
+        test.Location  = new Point(toggle.Left - test.Width - 12, (row.Height - test.Height) / 2);
+        test.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+        test.Click   += (_, _) => TestNotificationRequested?.Invoke(kind);
+
+        row.Controls.Add(label);
+        row.Controls.Add(test);
+        row.Controls.Add(toggle);
+
+        _notifySubRows.Add((label, toggle, test));
+        return row;
+    }
+
+    // Dims the per-type sub-rows (label, toggle, Test) whenever the master switch is off.
+    private void ApplyNotifyEnabled()
+    {
+        bool on = _notifyMasterToggle.Checked;
+        foreach (var (label, toggle, test) in _notifySubRows)
+        {
+            toggle.Enabled   = on;
+            test.Enabled     = on;
+            label.ForeColor  = on ? Theme.Fg : Theme.Muted;
+        }
     }
 
     private void BuildUpdatesSection(FlowLayoutPanel root)

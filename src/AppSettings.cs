@@ -17,6 +17,16 @@ internal sealed class AppSettings
     // state the first time it's opened, so existing installs show as "on" without re-toggling.
     public bool? PermissionDetectionEnabled { get; set; }
 
+    // Master switch for Windows desktop (toast/balloon) notifications. When off, no session
+    // balloon is ever shown; the overlay's own attention flash is unaffected. The per-type
+    // switches below only take effect while this is on.
+    public bool NotificationsEnabled { get; set; } = true;
+
+    // Per-type switches: "Done" fires when a session finishes working (busy -> idle);
+    // "WaitingForInput" fires when a session is blocked on a prompt (e.g. a permission request).
+    public bool NotifyOnDone { get; set; } = true;
+    public bool NotifyOnWaitingInput { get; set; } = true;
+
     public static AppSettings Load()
     {
         try

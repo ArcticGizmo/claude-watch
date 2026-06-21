@@ -118,6 +118,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm = new SettingsForm(_settings, _pluginManager, _usageMonitor, _lastUsage);
         _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
+        _settingsForm.TestNotificationRequested += ShowTestNotification;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -216,25 +217,50 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private void OnNeedsAttention(ClaudeSession session)
     {
+        // The overlay's own attention flash is always on; only the Windows balloon is gated.
         _overlay.TriggerAttention();
 
-        _lastNotifiedPid = session.Pid;
-        _notifyIcon.BalloonTipTitle = "Claude Code — Done";
-        _notifyIcon.BalloonTipText  = $"Waiting for you in {session.ProjectName}";
-        _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
-        _notifyIcon.ShowBalloonTip(8000);
+        if (!_settings.NotificationsEnabled || !_settings.NotifyOnDone)
+            return;
+
+        ShowSessionBalloon(NotificationKind.Done, session.ProjectName, session.Pid);
     }
 
     private void OnAwaitingInput(ClaudeSession session)
     {
         _overlay.TriggerAttention();
 
-        _lastNotifiedPid = session.Pid;
-        _notifyIcon.BalloonTipTitle = "Claude Code — Waiting for Input";
-        _notifyIcon.BalloonTipText  = $"{session.ProjectName} needs your response";
-        _notifyIcon.BalloonTipIcon  = ToolTipIcon.Warning;
+        if (!_settings.NotificationsEnabled || !_settings.NotifyOnWaitingInput)
+            return;
+
+        ShowSessionBalloon(NotificationKind.WaitingForInput, session.ProjectName, session.Pid);
+    }
+
+    // Shows the desktop balloon for a session notification. A null pid means there's no real
+    // session behind it (a settings "Test"), so a click won't try to focus a terminal.
+    private void ShowSessionBalloon(NotificationKind kind, string projectName, string? pid)
+    {
+        _lastNotifiedPid = pid;
+        switch (kind)
+        {
+            case NotificationKind.Done:
+                _notifyIcon.BalloonTipTitle = "Claude Code — Done";
+                _notifyIcon.BalloonTipText  = $"Waiting for you in {projectName}";
+                _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
+                break;
+            case NotificationKind.WaitingForInput:
+                _notifyIcon.BalloonTipTitle = "Claude Code — Waiting for Input";
+                _notifyIcon.BalloonTipText  = $"{projectName} needs your response";
+                _notifyIcon.BalloonTipIcon  = ToolTipIcon.Warning;
+                break;
+        }
         _notifyIcon.ShowBalloonTip(8000);
     }
+
+    // Fired by the settings window's per-type "Test" buttons: shows a sample balloon so the user
+    // can preview exactly what that notification looks like, regardless of the saved toggles.
+    private void ShowTestNotification(NotificationKind kind)
+        => ShowSessionBalloon(kind, "example-project", null);
 
     // Clicking the desktop notification focuses the terminal for the session that
     // raised it and acknowledges the alert, mirroring an overlay/indicator click.
