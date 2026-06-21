@@ -12,7 +12,8 @@
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/prompt-router.ps1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "prompt"
             ]
           }
         ]
@@ -20,6 +21,7 @@
     ],
     "SessionEnd": [
       {
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
@@ -29,7 +31,8 @@
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup.ps1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "cleanup"
             ]
           }
         ]
