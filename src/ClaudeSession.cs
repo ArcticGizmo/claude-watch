@@ -8,6 +8,14 @@ public enum SessionStatus
     AwaitingInput = 3,
 }
 
+/// <summary>The kinds of desktop notification Claude Watch raises for a session, each with its
+/// own settings toggle. "Done" = work finished; "WaitingForInput" = blocked on a prompt.</summary>
+public enum NotificationKind
+{
+    Done = 0,
+    WaitingForInput = 1,
+}
+
 public enum PermissionMode
 {
     Normal = 0,
