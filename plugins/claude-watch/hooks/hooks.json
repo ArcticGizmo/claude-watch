@@ -1,5 +1,23 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/prompt-router.ps1"
+            ]
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "hooks": [

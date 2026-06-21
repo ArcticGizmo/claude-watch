@@ -1,8 +1,7 @@
 ---
 description: Toggle Claude Watch external (ntfy) notifications for this session
-allowed-tools: Bash(powershell.exe:*)
+disable-model-invocation: true
 ---
 
-!`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/afk.ps1" -SessionId "${CLAUDE_SESSION_ID}"`
-
-Relay the status line above to the user verbatim. Do nothing else.
+Handled directly by the claude-watch plugin's UserPromptSubmit hook, which runs
+`scripts/afk.ps1` and reports the result to you. This body never reaches the model.
