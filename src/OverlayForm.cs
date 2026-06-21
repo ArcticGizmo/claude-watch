@@ -1138,13 +1138,50 @@ internal sealed class OverlayForm : Form
     }
 
     // ── Context menu ─────────────────────────────────────────────────────────
+    // The session under the cursor when the context menu opened, if it is being remote-controlled.
+    // Captured on Opening because the cursor has usually moved by the time an item is clicked.
+    private ClaudeSession? _qrMenuSession;
+    private QrCodeForm? _qrForm;
+
     private ContextMenuStrip BuildContextMenu()
     {
         var menu = new ContextMenuStrip();
+
+        var qr = new ToolStripMenuItem("Show QR code");
+        qr.Click += (_, _) => { if (_qrMenuSession is { } s) ShowQrCode(s); };
+        var sep = new ToolStripSeparator();
+
         var exit = new ToolStripMenuItem("Exit Claude Watch");
         exit.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
-        menu.Items.Add(exit);
+
+        menu.Items.AddRange(new ToolStripItem[] { qr, sep, exit });
+
+        // Offer the QR item only when the menu opens over a remote-controlled session row.
+        menu.Opening += (_, _) =>
+        {
+            int row = HitTestRow(PointToClient(Cursor.Position));
+            var session = row >= 0 ? _rows[row].Session : null;
+            _qrMenuSession = session is { RemoteControlled: true } ? session : null;
+            qr.Visible  = _qrMenuSession != null;
+            sep.Visible = _qrMenuSession != null;
+        };
+
         return menu;
+    }
+
+    // Pops a centered QR card encoding the session's remote-control deep link. Only one is shown at
+    // a time; opening another (or this one losing focus) closes the previous.
+    private void ShowQrCode(ClaudeSession session)
+    {
+        if (string.IsNullOrEmpty(session.BridgeSessionId)) return;
+
+        _qrForm?.Close();
+        var url = $"https://claude.ai/code/{session.BridgeSessionId}";
+        _qrForm = new QrCodeForm(session.ProjectName, url);
+        _qrForm.FormClosed += (_, _) => _qrForm = null;
+        _qrForm.CenterOn(Screen.FromControl(this));
+        _qrForm.Show();
+        _qrForm.Activate();
     }
 
     // ── Hot key ────────────────────────────────────────────────────────────────
@@ -1205,6 +1242,7 @@ internal sealed class OverlayForm : Form
             _usageHoverTimer.Dispose();
             _denseCloseTimer.Dispose();
             _usageTooltip.Dispose();
+            _qrForm?.Dispose();
             _icon?.Dispose();
         }
         base.Dispose(disposing);
