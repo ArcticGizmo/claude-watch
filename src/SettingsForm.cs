@@ -45,6 +45,10 @@ internal sealed class SettingsForm : Form
     private TextBox      _ntfyHostBox    = null!;
     private TextBox      _ntfyTopicBox   = null!;
     private QrCodeForm?  _topicQrForm;
+    // Sub-row toggle: include the claude.ai deep link as an action for remote-controlled sessions.
+    // Dimmed while the external master toggle is off.
+    private ToggleSwitch _remoteLinkToggle = null!;
+    private Label        _remoteLinkLabel  = null!;
 
     private UsageInfo _usage;
 
@@ -360,6 +364,7 @@ internal sealed class SettingsForm : Form
         {
             _settings.ExternalNotificationsEnabled = _externalToggle.Checked;
             _settings.Save();
+            ApplyExternalEnabled();
             ExternalNotificationsEnabledChanged?.Invoke(_externalToggle.Checked);
         };
         root.Controls.Add(TitleRow("External notifications", _externalToggle));
@@ -424,12 +429,59 @@ internal sealed class SettingsForm : Form
         topicRow.Controls.Add(qrBtn);
         root.Controls.Add(topicRow);
 
+        root.Controls.Add(BuildRemoteLinkRow());
+
         var row = ButtonRow();
         row.Margin = new Padding(0, 4, 0, 4);
         var testBtn = MakeButton("Send test notification");
         testBtn.Click += (_, _) => { _settings.Save(); TestExternalNotificationRequested?.Invoke(); };
         row.Controls.Add(testBtn);
         root.Controls.Add(row);
+
+        ApplyExternalEnabled();
+    }
+
+    // An indented sub-row that opts remote-controlled sessions into carrying a claude.ai "Open
+    // session" deep link in their push. Dimmed (like the per-type notify rows) while the external
+    // master toggle is off, since no push is sent then anyway.
+    private Panel BuildRemoteLinkRow()
+    {
+        var row = new Panel
+        {
+            Width  = ContentWidth,
+            Height = 30,
+            Margin = new Padding(0, 2, 0, 4),
+        };
+
+        _remoteLinkLabel = new Label
+        {
+            Text      = "Include a claude.ai link for remote-controlled sessions",
+            AutoSize  = true,
+            ForeColor = Theme.Fg,
+            Location  = new Point(16, 7),
+        };
+
+        _remoteLinkToggle = MakeToggle();
+        _remoteLinkToggle.Checked = _settings.ExternalNotificationsIncludeRemoteLink;
+        _remoteLinkToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.ExternalNotificationsIncludeRemoteLink = _remoteLinkToggle.Checked;
+            _settings.Save();
+        };
+        _remoteLinkToggle.Location = new Point(ContentWidth - _remoteLinkToggle.Width, (row.Height - _remoteLinkToggle.Height) / 2);
+        _remoteLinkToggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
+
+        row.Controls.Add(_remoteLinkLabel);
+        row.Controls.Add(_remoteLinkToggle);
+        return row;
+    }
+
+    // Dims the remote-link sub-row whenever the external master switch is off.
+    private void ApplyExternalEnabled()
+    {
+        bool on = _externalToggle.Checked;
+        _remoteLinkToggle.Enabled  = on;
+        _remoteLinkLabel.ForeColor = on ? Theme.Fg : Theme.Muted;
     }
 
     // Mints a hard-to-guess topic of the form "claude-watch-{random}", padded with random

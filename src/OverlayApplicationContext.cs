@@ -343,8 +343,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(topic))
             return;
 
+        // Attach an "Open session" action only when the session is remote-controlled (so the deep
+        // link actually resolves) and the user has opted into including it.
+        string? actionUrl = _settings.ExternalNotificationsIncludeRemoteLink && session.RemoteControlled
+            ? $"https://claude.ai/code/{session.BridgeSessionId}"
+            : null;
+
         // Fire-and-forget: a failed push must never stall or crash the monitor callback.
-        _ = NtfyNotifier.SendAsync(host, topic, title, body, tags);
+        _ = NtfyNotifier.SendAsync(host, topic, title, body, tags, actionUrl, "Open session");
     }
 
     // The settings window's "Send test notification": pushes a sample to the configured ntfy

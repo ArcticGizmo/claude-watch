@@ -35,6 +35,12 @@ internal sealed class AppSettings
     public string? NtfyHost  { get; set; }
     public string? NtfyTopic { get; set; }
 
+    // When on, a remote-controlled session's external push carries a "view" action that opens the
+    // session on claude.ai (https://claude.ai/code/{bridgeSessionId}). Off by default — not
+    // everyone wants the deep link in their notifications — and only relevant while the session
+    // is actually connected via /remote-control. Gated by ExternalNotificationsEnabled.
+    public bool ExternalNotificationsIncludeRemoteLink { get; set; }
+
     public static AppSettings Load()
     {
         try

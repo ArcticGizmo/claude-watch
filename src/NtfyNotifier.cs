@@ -13,9 +13,14 @@ internal static class NtfyNotifier
     // One shared client (sockets are pooled); a short timeout keeps a dead host from hanging.
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
 
-    /// <summary>Posts a notification. Returns (true, null) on a 2xx response, else (false, reason).</summary>
+    /// <summary>
+    /// Posts a notification. Returns (true, null) on a 2xx response, else (false, reason). When
+    /// <paramref name="actionUrl"/> is set, a single "view" action button (labelled
+    /// <paramref name="actionLabel"/>) is attached that opens that URL when tapped.
+    /// </summary>
     public static async Task<(bool ok, string? error)> SendAsync(
-        string host, string topic, string title, string message, string? tags = null)
+        string host, string topic, string title, string message, string? tags = null,
+        string? actionUrl = null, string? actionLabel = null)
     {
         try
         {
@@ -33,6 +38,12 @@ internal static class NtfyNotifier
             req.Headers.TryAddWithoutValidation("Title", Ascii(title));
             if (!string.IsNullOrEmpty(tags))
                 req.Headers.TryAddWithoutValidation("Tags", tags);
+            // A "view" action opens the URL when the button is tapped. The Actions header is
+            // comma-delimited, so the label can't contain commas; the URL never does here. clear=true
+            // dismisses the notification once it's been acted on.
+            if (!string.IsNullOrEmpty(actionUrl))
+                req.Headers.TryAddWithoutValidation(
+                    "Actions", $"view, {Ascii(actionLabel ?? "Open")}, {actionUrl}, clear=true");
 
             using var resp = await Http.SendAsync(req);
             return resp.IsSuccessStatusCode
