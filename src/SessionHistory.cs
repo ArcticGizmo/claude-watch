@@ -328,8 +328,10 @@ internal static class SessionHistory
     );
 
     // Project name keyed by transcript path — the cwd inside a transcript never changes, so caching
-    // avoids reopening every file on each (frequent) re-list.
+    // avoids reopening every file on each (frequent) re-list. Listing runs on a background thread, so
+    // guard the cache.
     private static readonly Dictionary<string, string> _projectNameCache = new();
+    private static readonly object _cacheLock = new();
 
     /// <summary>Lists every session transcript across all projects, active first, then newest-first.</summary>
     public static List<HistoryEntry> ListAll(IReadOnlySet<string> activeSessionIds)
@@ -376,8 +378,11 @@ internal static class SessionHistory
     // the encoded directory name when no cwd can be recovered.
     private static (string project, string cwd) ResolveProject(string file, string dir)
     {
-        if (_projectNameCache.TryGetValue(file, out var cached))
-            return (cached, "");
+        lock (_cacheLock)
+        {
+            if (_projectNameCache.TryGetValue(file, out var cached))
+                return (cached, "");
+        }
 
         string cwd = "";
         try
@@ -404,7 +409,8 @@ internal static class SessionHistory
         if (string.IsNullOrEmpty(project))
             project = "session";
 
-        _projectNameCache[file] = project;
+        lock (_cacheLock)
+            _projectNameCache[file] = project;
         return (project, cwd);
     }
 

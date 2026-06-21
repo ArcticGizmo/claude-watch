@@ -80,6 +80,13 @@ internal sealed class HistoryViewerForm : Form
     private bool _suppressSelect;
     private bool _listed;
 
+    // Async dropdown population (the transcript scan runs off the UI thread). _pendingSelect remembers
+    // a SelectSession request made before the list finished loading, applied once it's ready.
+    private bool _loading;
+    private bool _reloadQueued;
+    private string? _pendingSelect;
+    private bool _pendingSelectSet;
+
     private TranscriptParser? _parser;
     private string? _loadedSessionId;
     private bool _raw;
@@ -88,6 +95,8 @@ internal sealed class HistoryViewerForm : Form
     private readonly HashSet<string> _expanded = new();
     // Character ranges of each clickable tool-summary line in the current readable render.
     private readonly List<(int start, int end, string key)> _toolRanges = new();
+    // Character ranges of clickable markdown links (incl. images) and the URL each opens.
+    private readonly List<(int start, int end, string url)> _linkRanges = new();
     private int _renderedCount;
 
     private readonly FileSystemWatcher _watcher;
@@ -129,6 +138,7 @@ internal sealed class HistoryViewerForm : Form
             HideSelection = false,
         };
         _body.MouseUp += OnBodyMouseUp;
+        _body.MouseMove += OnBodyMouseMove;
 
         // ── Toolbar ──
         _toolbar = new DoubleBufferedPanel { Dock = DockStyle.Top, Height = ToolbarH, BackColor = Theme.FormBg };
@@ -220,41 +230,88 @@ internal sealed class HistoryViewerForm : Form
         }
     }
 
-    /// <summary>Selects the given session in the dropdown (or the most recent one if not found).</summary>
+    /// <summary>Selects the given session in the dropdown (or the most recent one if not found). If the
+    /// list is still loading, the request is remembered and applied once it's ready.</summary>
     public void SelectSession(string? sessionId)
     {
-        int idx = sessionId == null ? -1 : _entries.FindIndex(e => e.SessionId == sessionId);
-        if (idx < 0 && _entries.Count > 0) idx = 0;
-        if (idx >= 0) _dropdown.SelectedIndex = idx;
-        else ShowMessage("No session history found.");
+        _pendingSelect = sessionId;
+        _pendingSelectSet = true;
+        if (!_loading) ApplySelection();
+    }
+
+    private void ApplySelection()
+    {
+        if (!_pendingSelectSet) return;
+        _pendingSelectSet = false;
+
+        if (_entries.Count == 0) { ShowMessage("No session history found."); return; }
+
+        int idx = _pendingSelect == null ? 0 : _entries.FindIndex(e => e.SessionId == _pendingSelect);
+        if (idx < 0) idx = 0;
+
+        if (_dropdown.SelectedIndex != idx) _dropdown.SelectedIndex = idx; // fires LoadSelected
+        else LoadSelected();
     }
 
     // ── Dropdown entries ─────────────────────────────────────────────────────────
     private void RefreshEntries()
     {
-        // Don't yank the list out from under an open dropdown.
-        if (_dropdown.DroppedDown) return;
+        if (_dropdown.DroppedDown) return;          // don't yank the list out from under an open dropdown
+        if (_loading) { _reloadQueued = true; return; }
 
+        _loading = true;
         var keep = _loadedSessionId;
-        _entries = SessionHistory.ListAll(_activeIds);
+        var ids = new HashSet<string>(_activeIds);  // snapshot for the background thread
+
+        // The first scan opens 300+ transcripts to read project names; do it off the UI thread so the
+        // window paints immediately instead of freezing. Results are cached, so re-lists are cheap.
+        if (_dropdown.Items.Count == 0)
+            ShowMessage("Loading session history…");
+
+        Task.Run(() => SessionHistory.ListAll(ids)).ContinueWith(t =>
+        {
+            var list = t.IsCompletedSuccessfully ? t.Result : new List<HistoryEntry>();
+            try
+            {
+                if (IsHandleCreated && !IsDisposed)
+                    BeginInvoke((Action)(() => PopulateDropdown(list, keep)));
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+        });
+    }
+
+    private void PopulateDropdown(List<HistoryEntry> list, string? keep)
+    {
+        _entries = list;
 
         _suppressSelect = true;
         _dropdown.BeginUpdate();
         _dropdown.Items.Clear();
         foreach (var entry in _entries)
             _dropdown.Items.Add(entry);
+        int keepIdx = keep == null ? -1 : _entries.FindIndex(e => e.SessionId == keep);
+        if (keepIdx >= 0) _dropdown.SelectedIndex = keepIdx;
         _dropdown.EndUpdate();
-
-        int idx = keep == null ? -1 : _entries.FindIndex(e => e.SessionId == keep);
-        if (idx < 0 && _entries.Count > 0 && keep == null) idx = 0;
-        if (idx >= 0) _dropdown.SelectedIndex = idx;
         _suppressSelect = false;
 
-        // If nothing was loaded yet, load the now-selected entry; otherwise just keep the labels fresh.
-        if (_loadedSessionId == null && _dropdown.SelectedIndex >= 0)
-            LoadSelected();
+        _loading = false;
+
+        if (_pendingSelectSet)
+            ApplySelection();
+        else if (_loadedSessionId == null && _entries.Count > 0)
+        {
+            // No explicit request outstanding and nothing shown yet — default to the most recent.
+            _pendingSelect = null;
+            _pendingSelectSet = true;
+            ApplySelection();
+        }
         else
+        {
             _dropdown.Invalidate();
+        }
+
+        if (_reloadQueued) { _reloadQueued = false; RefreshEntries(); }
     }
 
     private HistoryEntry? CurrentEntry() =>
@@ -332,7 +389,10 @@ internal sealed class HistoryViewerForm : Form
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────────
-    private void RenderFull()
+    // keepScroll: preserve the current scroll position even when Follow is on. Used when the rebuild is
+    // triggered by the user (expand/collapse) rather than by new data, so the thing they clicked stays
+    // in view instead of the view snapping to the bottom.
+    private void RenderFull(bool keepScroll = false)
     {
         if (!IsHandleCreated) return;
         int firstVisible = SafeFirstVisibleChar();
@@ -340,6 +400,7 @@ internal sealed class HistoryViewerForm : Form
         BeginUpdate();
         _body.Clear();
         _toolRanges.Clear();
+        _linkRanges.Clear();
         _renderedCount = 0;
 
         if (_parser == null || _parser.Events.Count == 0)
@@ -352,7 +413,7 @@ internal sealed class HistoryViewerForm : Form
         AppendEvents(0);
         EndUpdate();
 
-        if (_follow) ScrollToBottom();
+        if (_follow && !keepScroll) ScrollToBottom();
         else RestoreScroll(firstVisible);
     }
 
@@ -658,15 +719,25 @@ internal sealed class HistoryViewerForm : Form
                 }
 
                 case LinkInline link:
+                {
+                    int start = _body.TextLength;
                     if (link.IsImage)
-                        Emit($"[image: {link.Url}]", FontFor(style with { Italic = true }), Theme.Muted);
+                        Emit($"🖼 {ImageLabel(link)}", FontFor(style with { Link = true }), Theme.Accent);
                     else
                         RenderInlines(link, style with { Link = true });
+                    if (!string.IsNullOrEmpty(link.Url))
+                        _linkRanges.Add((start, _body.TextLength, link.Url!));
                     break;
+                }
 
                 case AutolinkInline auto:
+                {
+                    int start = _body.TextLength;
                     Emit(auto.Url, FontFor(style with { Link = true }), Theme.Accent);
+                    if (!string.IsNullOrEmpty(auto.Url))
+                        _linkRanges.Add((start, _body.TextLength, auto.Url));
                     break;
+                }
 
                 case LineBreakInline br:
                     Emit(br.IsHard ? "\n" : " ", _uiFont, Theme.Fg);
@@ -681,6 +752,13 @@ internal sealed class HistoryViewerForm : Form
                     break;
             }
         }
+    }
+
+    // Label for an image link: its alt text if present, otherwise the URL.
+    private static string ImageLabel(LinkInline link)
+    {
+        var alt = PlainText(link).Trim();
+        return string.IsNullOrEmpty(alt) ? (link.Url ?? "image") : alt;
     }
 
     private static string CellText(TableCell cell)
@@ -807,15 +885,42 @@ internal sealed class HistoryViewerForm : Form
         if (_body.SelectionLength > 0) return; // a text selection, not a click
 
         int idx = _body.GetCharIndexFromPosition(e.Location);
+
+        // A markdown link (or image) opens in the default handler.
+        foreach (var (start, end, url) in _linkRanges)
+        {
+            if (idx >= start && idx < end) { OpenUrl(url); return; }
+        }
+
+        // A tool-summary line toggles its detail, keeping the clicked line in view.
         foreach (var (start, end, key) in _toolRanges)
         {
             if (idx >= start && idx < end)
             {
                 if (!_expanded.Remove(key)) _expanded.Add(key);
-                RenderFull();
-                break;
+                RenderFull(keepScroll: true);
+                return;
             }
         }
+    }
+
+    private void OnBodyMouseMove(object? sender, MouseEventArgs e)
+    {
+        if (_raw) { return; }
+        int idx = _body.GetCharIndexFromPosition(e.Location);
+        bool clickable = false;
+        foreach (var (start, end, _) in _linkRanges)
+            if (idx >= start && idx < end) { clickable = true; break; }
+        if (!clickable)
+            foreach (var (start, end, _) in _toolRanges)
+                if (idx >= start && idx < end) { clickable = true; break; }
+        _body.Cursor = clickable ? Cursors.Hand : Cursors.IBeam;
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { /* no handler / blocked path — nothing useful to do */ }
     }
 
     // ── View / follow toggles ────────────────────────────────────────────────────
