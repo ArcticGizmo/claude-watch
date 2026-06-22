@@ -1,7 +1,7 @@
 {
   "name": "claude-watch",
   "version": "0.1.0",
-  "description": "Slash commands to control claude-watch from inside a Claude Code session: /afk toggles external notifications, /history opens the session history panel. Hooks pipe the command to `claude-watch handle`, which owns all logic in the tray app. Fails gracefully when claude-watch isn't installed or running.",
+  "description": "Integrates Claude Code with the claude-watch tray app: reports each session's live permission mode, and adds /afk (toggle external notifications) and /history (open the history panel). Command logic lives in the tray app (claude-watch handle ...); fails gracefully when claude-watch isn't installed or running.",
   "author": { "name": "Jonathan Howell" },
   "hooks": "./hooks/hooks.json"
 }

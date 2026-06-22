@@ -12,11 +12,6 @@ internal sealed class AppSettings
     // Defaults to true; a missing key in an older settings file keeps this default.
     public bool ShowUsage { get; set; } = true;
 
-    // User intent for the permission-mode detection plugin (the Material toggle in settings).
-    // null = not chosen yet; the settings window infers it from the plugin's actual installed
-    // state the first time it's opened, so existing installs show as "on" without re-toggling.
-    public bool? PermissionDetectionEnabled { get; set; }
-
     // Master switch for Windows desktop (toast/balloon) notifications. When off, no session
     // balloon is ever shown; the overlay's own attention flash is unaffected. The per-type
     // switches below only take effect while this is on.

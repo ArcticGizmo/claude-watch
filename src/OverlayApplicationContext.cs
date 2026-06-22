@@ -20,7 +20,6 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _usageTimer;
     private readonly NotifyIcon _notifyIcon;
     private readonly AppSettings _settings;
-    private readonly PluginManager _pluginManager = new();
 
     // Tracks workstation lock state so the AFK override can push any session's alert while locked.
     private readonly LockMonitor _lockMonitor = new();
@@ -137,7 +136,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             return;
         }
 
-        _settingsForm = new SettingsForm(_settings, _pluginManager, _usageMonitor, _lastUsage);
+        _settingsForm = new SettingsForm(_settings, _usageMonitor, _lastUsage);
         _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
         _settingsForm.TestNotificationRequested += ShowTestNotification;

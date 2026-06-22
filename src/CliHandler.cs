@@ -84,6 +84,7 @@ internal static partial class CliHandler
         var (_, sessionId) = Parse(payload);
         if (string.IsNullOrEmpty(sessionId))
             return 0;
+        TryDelete(Path.Combine(SessionsDir, sessionId + ".mode"));
         TryDelete(Path.Combine(SessionsDir, sessionId + ".afk"));
         TryDelete(Path.Combine(SessionsDir, sessionId + ".history"));
         return 0;
