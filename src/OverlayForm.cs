@@ -683,11 +683,11 @@ internal sealed class OverlayForm : Form
         var oldSmoothing = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        using var pen   = new Pen(RemoteColor, 1.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var pen   = new Pen(RemoteColor, 2.25f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         using var brush = new SolidBrush(RemoteColor);
 
         int oy = midY + 4;                                       // origin sits low so waves rise through the row
-        g.FillEllipse(brush, originX - 1, oy - 1, 3, 3);         // source dot
+        g.FillEllipse(brush, originX - 2, oy - 2, 4, 4);         // source dot
         g.DrawArc(pen, originX - 5, oy - 5, 10, 10, 270, 90);    // inner wave
         g.DrawArc(pen, originX - 9, oy - 9, 18, 18, 270, 90);    // outer wave
 
