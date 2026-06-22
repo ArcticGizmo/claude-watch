@@ -1,5 +1,4 @@
 # TODO
-- make dense mode support left or right monitor edge (default to right)
 - figure out how the visualize tasks better
 - fix afk 
 - and auto start and auto stop

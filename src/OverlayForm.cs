@@ -85,12 +85,17 @@ internal sealed class OverlayForm : Form
     // _dense toggles the whole mode; _denseOpen is the hover-expanded popup within it.
     // Floating and dense each keep their own position: _floatingLoc holds the floating
     // location while we're in dense mode, and _denseY holds the dense strip's Y (its X is
-    // always locked to the right screen edge). Nothing here is persisted across restarts.
+    // locked to the left or right screen edge per _denseSide). Nothing here is persisted across
+    // restarts.
     private bool  _dense;
     private bool  _denseOpen;
     private int   _denseY;
     private bool  _denseYInit;
     private Point _floatingLoc;
+
+    // Which screen edge the dense strip hugs. Right matches the historical behaviour; dragging the
+    // strip onto a left-edge drop lane flips it.
+    private DenseSide _denseSide = DenseSide.Right;
 
     // Which monitor the dense strip is docked to, stored by device name so a stale Screen object
     // can't pin us to a monitor that's been disconnected. Null means the primary screen.
@@ -332,7 +337,7 @@ internal sealed class OverlayForm : Form
             var wa = DenseScreen().WorkingArea;
             int w  = _denseOpen ? FormWidth : DenseClosedWidth;
             int h  = _denseOpen ? FullPanelHeight() : DenseStripHeight();
-            Location   = new Point(wa.Right - w, ClampDenseY(_denseY, h, wa));
+            Location   = new Point(DenseX(w, wa), ClampDenseY(_denseY, h, wa));
             ClientSize = new Size(w, h);
         }
         else
@@ -372,6 +377,10 @@ internal sealed class OverlayForm : Form
     private static int ClampDenseY(int y, int height, Rectangle wa) =>
         Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - height));
 
+    // X coordinate that hugs the docked edge: flush left, or flush right accounting for width.
+    private int DenseX(int width, Rectangle wa) =>
+        _denseSide == DenseSide.Left ? wa.Left : wa.Right - width;
+
     // Resolves the monitor the dense strip docks to. If the remembered monitor has been
     // disconnected, it self-heals by forgetting it and falling back to the primary screen.
     private Screen DenseScreen()
@@ -386,20 +395,25 @@ internal sealed class OverlayForm : Form
         return Screen.PrimaryScreen!;
     }
 
-    // ── Dense drop zones (multi-monitor) ────────────────────────────────────────
-    // While dragging the dense strip, every *other* monitor gets a right-edge drop lane; releasing
-    // over one re-pins the strip to that monitor. Shown only on a real drag with 2+ monitors.
+    // ── Dense drop zones ─────────────────────────────────────────────────────────
+    // While dragging the dense strip, every monitor gets a left- and a right-edge drop lane;
+    // releasing over one re-pins the strip to that monitor and edge. The lane matching the current
+    // dock is skipped (dropping there would be a no-op), so a single monitor still offers its
+    // opposite edge.
     private void ShowDropZones()
     {
-        if (_dropZones.Count > 0 || Screen.AllScreens.Length < 2) return;
+        if (_dropZones.Count > 0) return;
 
         var current = DenseScreen();
         foreach (var s in Screen.AllScreens)
         {
-            if (s.DeviceName == current.DeviceName) continue;
-            var zone = new DenseDropZoneForm(s);
-            _dropZones.Add(zone);
-            zone.Show();
+            foreach (var side in (ReadOnlySpan<DenseSide>)[DenseSide.Left, DenseSide.Right])
+            {
+                if (s.DeviceName == current.DeviceName && side == _denseSide) continue;
+                var zone = new DenseDropZoneForm(s, side);
+                _dropZones.Add(zone);
+                zone.Show();
+            }
         }
     }
 
@@ -422,13 +436,14 @@ internal sealed class OverlayForm : Form
         _activeDropZone = null;
     }
 
-    // Re-pins the dense strip to the monitor whose drop lane the cursor was released over,
+    // Re-pins the dense strip to the monitor and edge whose drop lane the cursor was released over,
     // dropping it at the release height (clamped onto that monitor).
     private void PinToActiveDropZone()
     {
         if (_activeDropZone == null) return;
         var screen = _activeDropZone.TargetScreen;
         _denseScreenDevice = screen.DeviceName;
+        _denseSide = _activeDropZone.Side;
         _denseY = ClampDenseY(Cursor.Position.Y - Height / 2, Height, screen.WorkingArea);
         RelayoutWindow();
         Invalidate();
@@ -561,9 +576,10 @@ internal sealed class OverlayForm : Form
                 DrawStatusPill(g, x, midY, idle, IdleColor, IdleColor, countFont);
         }
 
-        // Dense toggle icon (always present). Reversed (|<-) while in dense mode, where clicking it
-        // leaves dense mode; plain (->|) while floating, where clicking it enters dense mode.
-        DrawSideCollapseIcon(g, SideIconRect(), reversed: _dense);
+        // Dense toggle icon (always present). The glyph points along the docked edge: floating mode
+        // shows the arrow collapsing toward that edge, dense mode shows it expanding inward. Clicking
+        // it enters dense from floating, or leaves dense from the open popup.
+        DrawSideCollapseIcon(g, SideIconRect(), reversed: _dense ^ (_denseSide == DenseSide.Left));
 
         // Expand chevron — floating mode only (hidden in dense), and only when there's something to
         // expand. Sits just to the left of the dense toggle icon.
@@ -1063,11 +1079,11 @@ internal sealed class OverlayForm : Form
             {
                 if (_dense)
                 {
-                    // Dense stays hugging the current monitor's right edge, moving only vertically;
-                    // drop lanes on other monitors let it be re-pinned on release.
+                    // Dense stays hugging the current monitor's docked edge, moving only vertically;
+                    // drop lanes let it be re-pinned to another edge or monitor on release.
                     var wa   = DenseScreen().WorkingArea;
                     int newY = ClampDenseY(_formStartLoc.Y + dy, Height, wa);
-                    Location = new Point(wa.Right - Width, newY);
+                    Location = new Point(DenseX(Width, wa), newY);
                     _denseY  = newY;
                     UpdateActiveDropZone(cur);
                 }

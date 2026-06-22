@@ -2,10 +2,14 @@ using System.Drawing.Drawing2D;
 
 namespace ClaudeWatch;
 
+/// <summary>Which screen edge the dense strip docks to.</summary>
+internal enum DenseSide { Left, Right }
+
 /// <summary>
-/// A translucent column shown on the right edge of a monitor while the dense strip is being
-/// dragged, marking where it can be pinned. Purely visual: it never takes focus or input, so the
-/// overlay detects "cursor is over this zone" via screen coordinates rather than mouse events.
+/// A translucent column shown on the left or right edge of a monitor while the dense strip is
+/// being dragged, marking where it can be pinned. Purely visual: it never takes focus or input,
+/// so the overlay detects "cursor is over this zone" via screen coordinates rather than mouse
+/// events.
 /// </summary>
 internal sealed class DenseDropZoneForm : Form
 {
@@ -17,10 +21,12 @@ internal sealed class DenseDropZoneForm : Form
     private bool _active;
 
     public Screen TargetScreen { get; }
+    public DenseSide Side { get; }
 
-    public DenseDropZoneForm(Screen screen)
+    public DenseDropZoneForm(Screen screen, DenseSide side)
     {
         TargetScreen      = screen;
+        Side              = side;
         FormBorderStyle   = FormBorderStyle.None;
         ShowInTaskbar     = false;
         TopMost           = true;
@@ -32,7 +38,8 @@ internal sealed class DenseDropZoneForm : Form
         DoubleBuffered    = true;
 
         var wa = screen.WorkingArea;
-        Bounds = new Rectangle(wa.Right - ColumnWidth, wa.Top, ColumnWidth, wa.Height);
+        int x  = side == DenseSide.Left ? wa.Left : wa.Right - ColumnWidth;
+        Bounds = new Rectangle(x, wa.Top, ColumnWidth, wa.Height);
     }
 
     public bool ContainsScreenPoint(Point screenPt) => Bounds.Contains(screenPt);
@@ -71,15 +78,28 @@ internal sealed class DenseDropZoneForm : Form
         using (var pen = new Pen(Color.FromArgb(220, accent), 2f) { DashStyle = DashStyle.Dash })
             g.DrawRectangle(pen, 2, 2, ClientSize.Width - 5, ClientSize.Height - 5);
 
-        // A centered "->|" pin glyph hinting that the strip docks to this edge.
+        // A centered pin glyph (arrow into a pipe) hinting that the strip docks to this edge:
+        // "->|" for the right edge, mirrored to "|<-" for the left.
         int cx = ClientSize.Width / 2;
         int cy = ClientSize.Height / 2;
         using var glyphPen = new Pen(Color.White, 2.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        int pipeX    = cx + 9;
-        int shaftEnd = pipeX - 3;
-        g.DrawLine(glyphPen, cx - 11, cy, shaftEnd, cy);            // shaft
-        g.DrawLine(glyphPen, shaftEnd - 6, cy - 6, shaftEnd, cy);   // arrowhead
-        g.DrawLine(glyphPen, shaftEnd - 6, cy + 6, shaftEnd, cy);
-        g.DrawLine(glyphPen, pipeX, cy - 10, pipeX, cy + 10);       // pipe
+        if (Side == DenseSide.Right)
+        {
+            int pipeX    = cx + 9;
+            int shaftEnd = pipeX - 3;
+            g.DrawLine(glyphPen, cx - 11, cy, shaftEnd, cy);            // shaft
+            g.DrawLine(glyphPen, shaftEnd - 6, cy - 6, shaftEnd, cy);   // arrowhead
+            g.DrawLine(glyphPen, shaftEnd - 6, cy + 6, shaftEnd, cy);
+            g.DrawLine(glyphPen, pipeX, cy - 10, pipeX, cy + 10);       // pipe
+        }
+        else
+        {
+            int pipeX    = cx - 9;
+            int shaftEnd = pipeX + 3;
+            g.DrawLine(glyphPen, cx + 11, cy, shaftEnd, cy);            // shaft
+            g.DrawLine(glyphPen, shaftEnd + 6, cy - 6, shaftEnd, cy);   // arrowhead
+            g.DrawLine(glyphPen, shaftEnd + 6, cy + 6, shaftEnd, cy);
+            g.DrawLine(glyphPen, pipeX, cy - 10, pipeX, cy + 10);       // pipe
+        }
     }
 }
