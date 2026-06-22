@@ -1,7 +1,7 @@
 {
   "name": "claude-watch",
-  "version": "0.1.0",
-  "description": "Integrates Claude Code with the claude-watch tray app: reports each session's live permission mode, and adds /afk (toggle external notifications) and /history (open the history panel). Command logic lives in the tray app (claude-watch handle ...); fails gracefully when claude-watch isn't installed or running.",
+  "version": "0.2.0",
+  "description": "Integrates Claude Code with the claude-watch tray app: reports each session's live permission mode, and adds /afk (toggle external notifications) and /history (open the history panel). Commands are handled in the hook script itself by writing session sidecar files the tray observes; fails gracefully when claude-watch isn't installed or running.",
   "author": { "name": "Jonathan Howell" },
   "hooks": "./hooks/hooks.json"
 }

@@ -38,9 +38,9 @@ internal sealed class SessionMonitor : IDisposable
     public event Action<ClaudeSession>? AwaitingInput;
 
     /// <summary>
-    /// Raised when a session asks (via the watch-control plugin's <c>/history</c> command, which drops
-    /// a one-shot <c>{sessionId}.history</c> trigger file) to open the history viewer on that session.
-    /// Fired from <see cref="Scan"/>, i.e. already on the UI thread.
+    /// Raised when a session asks (via the plugin's <c>/history</c> command, which drops a one-shot
+    /// <c>{sessionId}.history</c> trigger file) to open the history viewer on that session. Fired
+    /// from <see cref="Scan"/>, i.e. already on the UI thread.
     /// </summary>
     public event Action<string>? OpenHistoryRequested;
 
@@ -116,6 +116,32 @@ internal sealed class SessionMonitor : IDisposable
         // the live sessions, so a freshly-opened viewer lands on the right (now-current) session.
         ProcessHistoryRequests();
         return sessions;
+    }
+
+    /// <summary>
+    /// Toggles a session's external-notification opt-in by writing or deleting its
+    /// <c>{sessionId}.notify</c> marker — the single source of truth shared with the plugin's /afk
+    /// command. Returns the resulting state (true = now on). Call <see cref="Scan"/> afterwards to
+    /// refresh the session list and glyphs from the new on-disk state.
+    /// </summary>
+    public bool ToggleExternalNotify(string sessionId)
+    {
+        var marker = Path.Combine(_sessionsDir, $"{sessionId}.notify");
+        try
+        {
+            if (File.Exists(marker))
+            {
+                File.Delete(marker);
+                return false;
+            }
+            Directory.CreateDirectory(_sessionsDir);
+            File.WriteAllText(marker, sessionId);
+            return true;
+        }
+        catch
+        {
+            return File.Exists(marker);
+        }
     }
 
     private DateTime? ComputeNextDeadline(IReadOnlyList<ClaudeSession> sessions)
@@ -251,10 +277,10 @@ internal sealed class SessionMonitor : IDisposable
 
             var mode = ReadPermissionMode(Path.Combine(_sessionsDir, $"{sessionId}.mode"));
 
-            // The watch-control plugin's /afk command writes a {sessionId}.afk marker to opt this
-            // session into external (ntfy) notifications; its mere presence is the signal.
-            var afkNotify = !string.IsNullOrEmpty(sessionId)
-                && File.Exists(Path.Combine(_sessionsDir, $"{sessionId}.afk"));
+            // External-notification opt-in: the presence of a {sessionId}.notify marker is the signal.
+            // Written/removed by both the overlay's right-click toggle and the plugin's /afk command.
+            var externalNotify = !string.IsNullOrEmpty(sessionId)
+                && File.Exists(Path.Combine(_sessionsDir, $"{sessionId}.notify"));
 
             // Track the start of the current continuous Running stretch so the overlay can show
             // elapsed run time; reset the moment the session stops running.
@@ -291,7 +317,7 @@ internal sealed class SessionMonitor : IDisposable
                 activity,
                 runningSince,
                 bridgeSessionId,
-                afkNotify
+                externalNotify
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))
@@ -308,9 +334,9 @@ internal sealed class SessionMonitor : IDisposable
         }
     }
 
-    // Consumes one-shot {sessionId}.history trigger files dropped by the watch-control plugin: each is
-    // deleted (so it fires exactly once) and turned into an OpenHistoryRequested event. Deleting the
-    // file re-fires the watcher, but the next Scan finds nothing to do, so it settles immediately.
+    // Consumes one-shot {sessionId}.history trigger files dropped by the plugin's /history command:
+    // each is deleted (so it fires exactly once) and turned into an OpenHistoryRequested event.
+    // Deleting the file re-fires the watcher, but the next Scan finds nothing to do, so it settles.
     private void ProcessHistoryRequests()
     {
         string[] files;
