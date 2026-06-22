@@ -19,11 +19,13 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        // `claude-watch.exe handle <event>` runs as a CLI for the plugin's hooks (read stdin, act,
-        // print, exit) and never starts the tray UI.
+        // The plugin's hooks now drive everything from PowerShell (writing the session sidecar files
+        // the tray observes), so the exe no longer has a CLI mode. A stale older plugin might still
+        // invoke `claude-watch.exe handle <event>`, though — short-circuit it to a harmless no-op so
+        // it never falls through and launches a second tray.
         if (args.Length > 0 && string.Equals(args[0], "handle", StringComparison.OrdinalIgnoreCase))
         {
-            Environment.Exit(CliHandler.Run(args));
+            Environment.Exit(0);
             return;
         }
 

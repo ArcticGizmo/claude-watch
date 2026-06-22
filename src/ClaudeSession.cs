@@ -48,7 +48,7 @@ public record ClaudeSession(
     string? Activity = null,
     DateTime? RunningSince = null,
     string? BridgeSessionId = null,
-    bool AfkNotify = false
+    bool ExternalNotify = false
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
@@ -62,11 +62,11 @@ public record ClaudeSession(
     public bool RemoteControlled => !string.IsNullOrEmpty(BridgeSessionId);
 
     /// <summary>
-    /// True when this session has opted in to external (ntfy) notifications from within Claude Code —
-    /// i.e. its session file has a sibling <c>{sessionId}.afk</c> marker written by the watch-control
-    /// plugin's <c>/afk</c> command. Equivalent to the overlay's right-click "external notify" toggle.
+    /// True when this session has opted in to external (ntfy) notifications — i.e. its session file
+    /// has a sibling <c>{sessionId}.notify</c> marker. The marker is the single source of truth,
+    /// written/removed both by the overlay's right-click toggle and the plugin's <c>/afk</c> command.
     /// </summary>
-    public bool AfkNotify { get; init; } = AfkNotify;
+    public bool ExternalNotify { get; init; } = ExternalNotify;
 
     /// <summary>
     /// How long this session has been continuously running, as a compact label showing only the

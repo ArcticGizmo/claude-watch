@@ -5,3 +5,4 @@
 - add more tabs for the settings
 - improve the readme to shoow all the features off
 - embedd changelog into application
+- add an "expected rate" indicator to session limits to see if you are on track

@@ -42,10 +42,6 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // can focus the right terminal.
     private string? _lastNotifiedPid;
 
-    // Session ids opted in to external (ntfy) notifications, set by right-clicking a session in the
-    // overlay. In-memory only — sessions are ephemeral, so this isn't persisted across restarts.
-    private readonly HashSet<string> _externalNotify = new();
-
     public OverlayApplicationContext()
     {
         _settings = AppSettings.Load();
@@ -92,7 +88,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _monitor.SessionsChanged += OnSessionsChanged;
         _monitor.NeedsAttention  += OnNeedsAttention;
         _monitor.AwaitingInput   += OnAwaitingInput;
-        // The watch-control plugin's /history command asks (via a trigger file) to open the viewer.
+        // The plugin's /history command drops a one-shot trigger file the monitor turns into this event.
         _monitor.OpenHistoryRequested += OpenHistoryViewer;
         // Fires on a thread-pool thread (watcher / process-exit callbacks); marshal to the UI thread.
         _monitor.ChangeDetected  += RequestScan;
@@ -248,8 +244,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.UpdateSessions(sessions);
         if (_historyForm is { IsDisposed: false })
             _historyForm.SetActiveSessions(sessions);
-        // Sessions can opt into external notifications from inside Claude Code (/afk), so refresh the
-        // overlay's opt-in glyphs to the union of the UI toggles and those file-based opt-ins.
+        // Refresh the overlay's mail glyphs from the per-session opt-in marker files just read.
         PushExternalNotifyGlyphs();
         ArmDeadlineTimer();
 
@@ -344,25 +339,20 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         => ShowSessionBalloon(kind, "example-project", null);
 
     // ── External (ntfy) notifications ─────────────────────────────────────────────
-    // Flips a session's external-notify opt-in (from the overlay's right-click menu) and pushes the
-    // refreshed set back so the glyph and menu wording update.
+    // Flips a session's external-notify opt-in from the overlay's right-click menu by writing or
+    // deleting its marker file — the same single source of truth the plugin's /afk command toggles,
+    // so the two paths can never disagree. The follow-up scan re-reads the file and refreshes glyphs.
     private void OnToggleExternalNotify(string sessionId)
     {
-        if (!_externalNotify.Remove(sessionId))
-            _externalNotify.Add(sessionId);
-        PushExternalNotifyGlyphs();
+        _monitor.ToggleExternalNotify(sessionId);
+        _monitor.Scan();
     }
 
-    // Pushes the union of the in-memory UI opt-ins (_externalNotify) and the per-session /afk file
-    // opt-ins to the overlay, so its mail glyphs reflect both ways a session can be enabled.
+    // Pushes the set of opted-in sessions (those carrying a marker file, per the latest scan) to the
+    // overlay so its mail glyphs and right-click wording match.
     private void PushExternalNotifyGlyphs()
-    {
-        var ids = new HashSet<string>(_externalNotify);
-        foreach (var s in _sessions)
-            if (s.AfkNotify)
-                ids.Add(s.SessionId);
-        _overlay.SetExternalNotifySessions(ids);
-    }
+        => _overlay.SetExternalNotifySessions(
+            _sessions.Where(s => s.ExternalNotify).Select(s => s.SessionId).ToHashSet());
 
     // Mirrors the master switch into the overlay (it gates the glyph and the right-click item) and
     // persists it. The host/topic are saved by the settings window itself.
@@ -377,9 +367,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // has opted in. Independent of the Windows-balloon per-type toggles above.
     private void MaybeSendExternal(NotificationKind kind, ClaudeSession session)
     {
-        // A session pushes if it opted in (right-click menu) OR the account-wide AFK override is on
-        // and the screen is currently locked. The master switch gates both paths.
-        bool optedIn   = _externalNotify.Contains(session.SessionId) || session.AfkNotify;
+        // A session pushes if it opted in (its marker file, set via right-click or /afk) OR the
+        // account-wide AFK override is on and the screen is currently locked. The master switch gates both.
+        bool optedIn   = session.ExternalNotify;
         bool afkActive = _settings.NotifyWhenLocked && _lockMonitor.IsLocked;
         if (!_settings.ExternalNotificationsEnabled || (!optedIn && !afkActive))
             return;
