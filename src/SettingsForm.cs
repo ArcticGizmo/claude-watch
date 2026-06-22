@@ -4,11 +4,10 @@ using System.Diagnostics;
 
 /// <summary>
 /// First-class settings window opened by left-clicking the tray icon. A single dark-themed,
-/// vertically-stacked panel with four sections: About, Permission Mode (detection plugin),
-/// Usage limits, and Updates. Reads/writes the shared <see cref="AppSettings"/> instance and
-/// drives <see cref="PluginManager"/>/<see cref="UsageMonitor"/> directly; toggling usage and
-/// checking for updates are raised as events so the owning context keeps timers and the overlay
-/// in sync.
+/// vertically-stacked panel with sections: About, Permission Mode (informational), Usage limits,
+/// Notifications, External notifications, and Updates. Reads/writes the shared <see cref="AppSettings"/>
+/// instance and drives <see cref="UsageMonitor"/> directly; toggling usage and checking for updates are
+/// raised as events so the owning context keeps timers and the overlay in sync.
 /// </summary>
 internal sealed class SettingsForm : Form
 {
@@ -16,18 +15,10 @@ internal sealed class SettingsForm : Form
     // room for a vertical scrollbar, so nothing clips.
     private const int ContentWidth = 607;
 
-    private readonly AppSettings   _settings;
-    private readonly PluginManager _pluginManager;
-    private readonly UsageMonitor  _usageMonitor;
+    private readonly AppSettings  _settings;
+    private readonly UsageMonitor _usageMonitor;
 
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
-
-    // Permission Mode section.
-    private ToggleSwitch _permToggle   = null!;
-    private Spinner      _permSpinner  = null!;
-    private Panel        _banner       = null!;
-    private Label        _bannerLabel  = null!;
-    private Button       _troubleshootBtn = null!;
 
     // Usage section.
     private ToggleSwitch     _usageToggle = null!;
@@ -73,13 +64,11 @@ internal sealed class SettingsForm : Form
     /// <summary>Raised when the user clicks "Send test notification" for the external (ntfy) channel.</summary>
     public event Action? TestExternalNotificationRequested;
 
-    public SettingsForm(AppSettings settings, PluginManager pluginManager,
-                        UsageMonitor usageMonitor, UsageInfo currentUsage)
+    public SettingsForm(AppSettings settings, UsageMonitor usageMonitor, UsageInfo currentUsage)
     {
-        _settings      = settings;
-        _pluginManager = pluginManager;
-        _usageMonitor  = usageMonitor;
-        _usage         = currentUsage;
+        _settings     = settings;
+        _usageMonitor = usageMonitor;
+        _usage        = currentUsage;
 
         Text            = "Claude Watch Settings";
         FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -101,12 +90,10 @@ internal sealed class SettingsForm : Form
         NativeMethods.UseDarkTitleBar(Handle);
     }
 
-    // Async work that shells out to the CLI must run after the handle exists.
-    protected override async void OnShown(EventArgs e)
+    protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
         NativeMethods.UseDarkScrollBars(_root.Handle);
-        await InitPermissionStateAsync();
     }
 
     // ── Layout ───────────────────────────────────────────────────────────────────
@@ -173,69 +160,31 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(LinkRow("Report an issue on GitHub", AppInfo.IssuesUrl));
     }
 
+    // The install commands for the claude-watch Claude Code plugin (marketplace ref name@marketplace).
+    private const string PluginInstallCommands =
+        "/plugin marketplace add ArcticGizmo/claude-watch\n/plugin install claude-watch@claude-watch";
+
     private void BuildPermissionSection(FlowLayoutPanel root)
     {
-        _permToggle = MakeToggle();
-        _permToggle.CheckedChanged += OnPermissionToggled;
-        _permSpinner = new Spinner();
-        root.Controls.Add(TitleRow("Permission Mode", _permToggle, _permSpinner));
-
-        // Start in the busy state — the real toggle position isn't known until the async probe
-        // in OnShown completes, so dim the toggle and spin until then.
-        SetPermBusy(true);
+        root.Controls.Add(SectionTitle("Permission Mode"));
 
         root.Controls.Add(BodyText(
-            "A Claude Code plugin reports each session's live permission mode to Claude Watch, " +
-            "shown as a coloured badge next to that session in the overlay:"));
+            "When the claude-watch Claude Code plugin is installed, each session's live permission " +
+            "mode is shown as a coloured badge next to that session in the overlay:"));
 
         root.Controls.Add(new ModeLegend { Width = ContentWidth, Margin = new Padding(0, 2, 0, 8) });
 
-        // Warning banner — only visible when detection is enabled but not actually active.
-        _banner = BuildBanner();
-        root.Controls.Add(_banner);
-    }
+        root.Controls.Add(BodyText(
+            "The same plugin also adds /afk (toggle external notifications) and /history (open this " +
+            "session's history). Install it once per machine by running these in any Claude Code session:"));
 
-    private Panel BuildBanner()
-    {
-        var banner = new Panel
-        {
-            Width     = ContentWidth,
-            Height    = 88,
-            BackColor = Theme.BannerBg,
-            Margin    = new Padding(0, 0, 0, 4),
-            Visible   = false,
-        };
-        banner.Paint += (_, e) =>
-        {
-            using var pen = new Pen(Theme.BannerBorder);
-            e.Graphics.DrawRectangle(pen, 0, 0, banner.Width - 1, banner.Height - 1);
-        };
+        root.Controls.Add(CodeBlock(PluginInstallCommands));
 
-        _bannerLabel = new Label
-        {
-            AutoSize    = true,
-            MaximumSize = new Size(ContentWidth - 24, 0),
-            ForeColor   = Theme.BannerFg,
-            BackColor   = Theme.BannerBg,
-            Location    = new Point(12, 10),
-        };
-        banner.Controls.Add(_bannerLabel);
-
-        var buttons = ButtonRow();
-        buttons.Location = new Point(8, 48);
-        _troubleshootBtn = MakeButton("Troubleshoot");
-        _troubleshootBtn.Click += (_, _) => OnTroubleshoot();
+        var row = ButtonRow();
         var copyBtn = MakeButton("Copy install commands");
-        copyBtn.Click += (_, _) =>
-        {
-            try { Clipboard.SetText(PluginManager.FallbackCommands); } catch { }
-            _bannerLabel.Text = "Install commands copied — paste them into a Claude Code session, then Troubleshoot.";
-        };
-        buttons.Controls.Add(_troubleshootBtn);
-        buttons.Controls.Add(copyBtn);
-        banner.Controls.Add(buttons);
-
-        return banner;
+        copyBtn.Click += (_, _) => { try { Clipboard.SetText(PluginInstallCommands); } catch { } };
+        row.Controls.Add(copyBtn);
+        root.Controls.Add(row);
     }
 
     private void BuildUsageSection(FlowLayoutPanel root)
@@ -583,92 +532,6 @@ internal sealed class SettingsForm : Form
             _usageBars.SetUsage(usage);
     }
 
-    // ── Permission Mode logic ────────────────────────────────────────────────────
-    // On open: probe the plugin's real state, default the toggle from it (or from saved intent),
-    // and surface a banner if the user wants detection on but it isn't actually live.
-    private async Task InitPermissionStateAsync()
-    {
-        var health = await _pluginManager.GetHealthAsync();
-        if (IsDisposed) return;
-
-        bool installed = health is PluginHealth.Healthy or PluginHealth.Disabled;
-        bool intent    = _settings.PermissionDetectionEnabled ?? installed;
-        _permToggle.SetCheckedSilently(intent);
-        SetPermBusy(false);
-        ApplyHealth(health);
-    }
-
-    private async void OnPermissionToggled(object? sender, EventArgs e)
-    {
-        bool intent = _permToggle.Checked;
-        _settings.PermissionDetectionEnabled = intent;
-        _settings.Save();
-
-        SetPermBusy(true);
-        _bannerLabel.Text = intent ? "Enabling detection…" : "Disabling detection…";
-        _banner.Visible   = true;
-
-        if (intent) await _pluginManager.InstallAsync();
-        else        await _pluginManager.UninstallAsync();
-
-        var health = await _pluginManager.GetHealthAsync();
-        if (IsDisposed) return;
-
-        SetPermBusy(false);
-        ApplyHealth(health);
-    }
-
-    // Toggles the busy state of the Permission Mode control: dims the switch and spins while an
-    // install/uninstall/probe is in flight, so the snap to its real position reads as a load.
-    private void SetPermBusy(bool busy)
-    {
-        _permToggle.Enabled = !busy;
-        if (busy) _permSpinner.Start();
-        else      _permSpinner.Stop();
-    }
-
-    // Re-runs diagnosis: re-checks health and, unless the CLI is missing, attempts an
-    // (idempotent) reinstall to fix a partial/disabled state, then refreshes the banner.
-    private async void OnTroubleshoot()
-    {
-        _troubleshootBtn.Enabled = false;
-        SetPermBusy(true);
-        _bannerLabel.Text = "Diagnosing…";
-
-        var health = await _pluginManager.GetHealthAsync();
-        if (health == PluginHealth.CliMissing)
-        {
-            if (IsDisposed) return;
-            _troubleshootBtn.Enabled = true;
-            SetPermBusy(false);
-            _bannerLabel.Text =
-                "Claude CLI not found on PATH. Copy the install commands and run them in a Claude " +
-                "Code session, or make sure 'claude' is on your PATH, then Troubleshoot again.";
-            return;
-        }
-
-        await _pluginManager.InstallAsync();
-        health = await _pluginManager.GetHealthAsync();
-        if (IsDisposed) return;
-
-        _troubleshootBtn.Enabled = true;
-        SetPermBusy(false);
-        ApplyHealth(health);
-        if (health != PluginHealth.Healthy)
-            _bannerLabel.Text =
-                "Still not active: " + PluginManager.Describe(health) +
-                ". Restart any open Claude Code sessions and Troubleshoot again.";
-    }
-
-    // Shows/hides the warning banner based on the user's intent vs. the plugin's real health.
-    private void ApplyHealth(PluginHealth health)
-    {
-        bool issue = _permToggle.Checked && health != PluginHealth.Healthy;
-        _banner.Visible = issue;
-        if (issue)
-            _bannerLabel.Text = "Detection is enabled but not active: " + PluginManager.Describe(health) + ".";
-    }
-
     // ── Control factories ───────────────────────────────────────────────────────────
     private static Label SectionTitle(string text) => new()
     {
@@ -681,7 +544,7 @@ internal sealed class SettingsForm : Form
 
     // A section header with a right-justified toggle on the same row, optionally with a spinner
     // sitting just to the left of the toggle.
-    private Panel TitleRow(string title, ToggleSwitch toggle, Spinner? spinner = null)
+    private Panel TitleRow(string title, ToggleSwitch toggle)
     {
         var row = new Panel
         {
@@ -701,13 +564,6 @@ internal sealed class SettingsForm : Form
         toggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
         row.Controls.Add(label);
         row.Controls.Add(toggle);
-
-        if (spinner != null)
-        {
-            spinner.Location = new Point(toggle.Left - spinner.Width - 10, (row.Height - spinner.Height) / 2);
-            spinner.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
-            row.Controls.Add(spinner);
-        }
         return row;
     }
 
@@ -741,6 +597,19 @@ internal sealed class SettingsForm : Form
         MaximumSize = new Size(ContentWidth, 0),  // wrap long lines, auto height
         ForeColor   = Theme.Muted,
         Margin      = new Padding(0, 0, 0, 6),
+    };
+
+    // A monospace, boxed block for copy-pasteable commands.
+    private static Label CodeBlock(string text) => new()
+    {
+        Text        = text,
+        AutoSize    = true,
+        MaximumSize = new Size(ContentWidth, 0),
+        Font        = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point),
+        ForeColor   = Theme.Fg,
+        BackColor   = Color.FromArgb(34, 34, 44),
+        Padding     = new Padding(10, 8, 10, 8),
+        Margin      = new Padding(0, 0, 0, 8),
     };
 
     private LinkLabel LinkRow(string text, string url)

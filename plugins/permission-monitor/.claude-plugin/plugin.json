@@ -1,7 +1,0 @@
-{
-  "name": "permission-monitor",
-  "version": "0.1.0",
-  "description": "Writes live permission_mode to ~/.claude/sessions/{session_id}.mode; removes it on SessionEnd.",
-  "author": { "name": "Jonathan Howell" },
-  "hooks": "./hooks/hooks.json"
-}

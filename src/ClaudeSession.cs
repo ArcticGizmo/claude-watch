@@ -47,7 +47,8 @@ public record ClaudeSession(
     IReadOnlyList<SubAgent>? SubAgents = null,
     string? Activity = null,
     DateTime? RunningSince = null,
-    string? BridgeSessionId = null
+    string? BridgeSessionId = null,
+    bool AfkNotify = false
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
@@ -59,6 +60,13 @@ public record ClaudeSession(
     /// encoded into the QR code (https://claude.ai/code/{BridgeSessionId}).
     /// </summary>
     public bool RemoteControlled => !string.IsNullOrEmpty(BridgeSessionId);
+
+    /// <summary>
+    /// True when this session has opted in to external (ntfy) notifications from within Claude Code —
+    /// i.e. its session file has a sibling <c>{sessionId}.afk</c> marker written by the watch-control
+    /// plugin's <c>/afk</c> command. Equivalent to the overlay's right-click "external notify" toggle.
+    /// </summary>
+    public bool AfkNotify { get; init; } = AfkNotify;
 
     /// <summary>
     /// How long this session has been continuously running, as a compact label showing only the

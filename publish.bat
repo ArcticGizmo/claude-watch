@@ -26,7 +26,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b %ERRORLEVEL%
 )
 
-vpk pack --packId ClaudeWatch --packVersion %VERSION% --packDir publish\ --mainExe ClaudeWatch.exe --outputDir releases\
+dnx vpk pack --packId ClaudeWatch --packVersion %VERSION% --packDir publish\ --mainExe ClaudeWatch.exe --outputDir releases\
 
 if %ERRORLEVEL% neq 0 (
     echo Pack failed. Is the vpk CLI installed? Run: dotnet tool install -g vpk

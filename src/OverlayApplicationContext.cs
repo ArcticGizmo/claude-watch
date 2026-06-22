@@ -20,7 +20,6 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _usageTimer;
     private readonly NotifyIcon _notifyIcon;
     private readonly AppSettings _settings;
-    private readonly PluginManager _pluginManager = new();
 
     // Tracks workstation lock state so the AFK override can push any session's alert while locked.
     private readonly LockMonitor _lockMonitor = new();
@@ -93,6 +92,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _monitor.SessionsChanged += OnSessionsChanged;
         _monitor.NeedsAttention  += OnNeedsAttention;
         _monitor.AwaitingInput   += OnAwaitingInput;
+        // The watch-control plugin's /history command asks (via a trigger file) to open the viewer.
+        _monitor.OpenHistoryRequested += OpenHistoryViewer;
         // Fires on a thread-pool thread (watcher / process-exit callbacks); marshal to the UI thread.
         _monitor.ChangeDetected  += RequestScan;
 
@@ -135,7 +136,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             return;
         }
 
-        _settingsForm = new SettingsForm(_settings, _pluginManager, _usageMonitor, _lastUsage);
+        _settingsForm = new SettingsForm(_settings, _usageMonitor, _lastUsage);
         _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
         _settingsForm.TestNotificationRequested += ShowTestNotification;
@@ -219,6 +220,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.UpdateSessions(sessions);
         if (_historyForm is { IsDisposed: false })
             _historyForm.SetActiveSessions(sessions);
+        // Sessions can opt into external notifications from inside Claude Code (/afk), so refresh the
+        // overlay's opt-in glyphs to the union of the UI toggles and those file-based opt-ins.
+        PushExternalNotifyGlyphs();
         ArmDeadlineTimer();
 
         _notifyIcon.Text = sessions.Count switch
@@ -318,7 +322,18 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         if (!_externalNotify.Remove(sessionId))
             _externalNotify.Add(sessionId);
-        _overlay.SetExternalNotifySessions(_externalNotify);
+        PushExternalNotifyGlyphs();
+    }
+
+    // Pushes the union of the in-memory UI opt-ins (_externalNotify) and the per-session /afk file
+    // opt-ins to the overlay, so its mail glyphs reflect both ways a session can be enabled.
+    private void PushExternalNotifyGlyphs()
+    {
+        var ids = new HashSet<string>(_externalNotify);
+        foreach (var s in _sessions)
+            if (s.AfkNotify)
+                ids.Add(s.SessionId);
+        _overlay.SetExternalNotifySessions(ids);
     }
 
     // Mirrors the master switch into the overlay (it gates the glyph and the right-click item) and
@@ -336,7 +351,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     {
         // A session pushes if it opted in (right-click menu) OR the account-wide AFK override is on
         // and the screen is currently locked. The master switch gates both paths.
-        bool optedIn   = _externalNotify.Contains(session.SessionId);
+        bool optedIn   = _externalNotify.Contains(session.SessionId) || session.AfkNotify;
         bool afkActive = _settings.NotifyWhenLocked && _lockMonitor.IsLocked;
         if (!_settings.ExternalNotificationsEnabled || (!optedIn && !afkActive))
             return;

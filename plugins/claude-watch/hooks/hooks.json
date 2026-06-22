@@ -12,7 +12,8 @@
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/write-mode.ps1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "prompt"
             ]
           }
         ]
@@ -30,7 +31,8 @@
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/write-mode.ps1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "mode"
             ]
           }
         ]
@@ -48,7 +50,8 @@
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/write-mode.ps1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "mode"
             ]
           }
         ]
@@ -66,7 +69,8 @@
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/write-mode.ps1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "mode"
             ]
           }
         ]
@@ -84,7 +88,8 @@
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-mode.ps1"
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "cleanup"
             ]
           }
         ]

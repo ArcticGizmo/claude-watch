@@ -4,9 +4,9 @@
   "owner": { "name": "Jonathan Howell", "email": "" },
   "plugins": [
     {
-      "name": "permission-monitor",
-      "source": "./plugins/permission-monitor",
-      "description": "Writes each session's live permission mode to ~/.claude/sessions/{id}.mode for claude-watch."
+      "name": "claude-watch",
+      "source": "./plugins/claude-watch",
+      "description": "Feeds each session's live permission mode to the claude-watch tray app, and adds /afk (toggle external notifications) and /history (open the history panel)."
     }
   ]
 }
