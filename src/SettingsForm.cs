@@ -3,22 +3,40 @@ namespace ClaudeWatch;
 using System.Diagnostics;
 
 /// <summary>
-/// First-class settings window opened by left-clicking the tray icon. A single dark-themed,
-/// vertically-stacked panel with sections: About, Permission Mode (informational), Usage limits,
-/// Notifications, External notifications, and Updates. Reads/writes the shared <see cref="AppSettings"/>
-/// instance and drives <see cref="UsageMonitor"/> directly; toggling usage and checking for updates are
-/// raised as events so the owning context keeps timers and the overlay in sync.
+/// First-class settings window opened by left-clicking the tray icon. A dark-themed window split
+/// into a fixed-width left navigation rail and a resizable content area. The nav switches between
+/// pages: Getting started (banner, feature overview, permission-mode badge legend), Plugin Control,
+/// Usage, Notifications (Windows desktop + external ntfy), and About (info + updates). Reads/writes
+/// the shared <see cref="AppSettings"/> instance and drives <see cref="UsageMonitor"/> directly;
+/// toggling usage and checking for updates are raised as events so the owning context keeps timers
+/// and the overlay in sync.
 /// </summary>
 internal sealed class SettingsForm : Form
 {
-    // Inner content width. The client is sized to fit this plus the 16px padding either side and
-    // room for a vertical scrollbar, so nothing clips.
-    private const int ContentWidth = 607;
+    private const int NavWidth = 178;
+    private const int PagePad  = 16;
+
+    // Slightly darker than the form body so the nav rail reads as a distinct sidebar.
+    private static readonly Color NavBg = Color.FromArgb(18, 18, 24);
 
     private readonly AppSettings  _settings;
     private readonly UsageMonitor _usageMonitor;
 
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+
+    // Shell.
+    private FlowLayoutPanel _navPanel    = null!;
+    private Panel           _contentHost = null!;
+    private readonly Dictionary<string, FlowLayoutPanel> _pages = new();
+    private readonly List<(string key, Panel item, Label label, Panel accent)> _navItems = new();
+    private string _currentKey = "";
+
+    // Fluid-width bookkeeping. The window is resizable, so every full-width control is registered
+    // here and re-sized whenever the content area changes. Width controls get their Width set to the
+    // available width minus an optional inset; wrap labels get their MaximumSize updated so AutoSize
+    // re-wraps to the new width.
+    private readonly List<(Control c, int inset)> _fluidWidth = new();
+    private readonly List<Label> _fluidWrap = new();
 
     // Usage section.
     private ToggleSwitch     _usageToggle = null!;
@@ -47,8 +65,6 @@ internal sealed class SettingsForm : Form
 
     private UsageInfo _usage;
 
-    private FlowLayoutPanel _root = null!;
-
     /// <summary>Raised when the user toggles "Show usage limits" (true = enabled).</summary>
     public event Action<bool>? UsageEnabledChanged;
 
@@ -71,13 +87,15 @@ internal sealed class SettingsForm : Form
         _usage        = currentUsage;
 
         Text            = "Claude Watch Settings";
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox     = false;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox     = true;
+        MinimizeBox     = true;
         StartPosition   = FormStartPosition.CenterScreen;
         BackColor       = Theme.FormBg;
         ForeColor       = Theme.Fg;
         Font            = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        ClientSize      = new Size(ContentWidth + 50, 858);
+        MinimumSize     = new Size(748, 560);
+        ClientSize      = new Size(880, 660);
         if (_icon != null)
             Icon = Icon.FromHandle(_icon.GetHicon());
 
@@ -93,95 +111,234 @@ internal sealed class SettingsForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
-        NativeMethods.UseDarkScrollBars(_root.Handle);
+        foreach (var page in _pages.Values)
+            NativeMethods.UseDarkScrollBars(page.Handle);
+        ApplyFluidWidth();
     }
 
-    // ── Layout ───────────────────────────────────────────────────────────────────
+    // ── Shell ─────────────────────────────────────────────────────────────────────
     private void BuildLayout()
     {
-        var root = _root = new FlowLayoutPanel
+        _navPanel = new FlowLayoutPanel
+        {
+            Dock          = DockStyle.Left,
+            Width         = NavWidth,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents  = false,
+            BackColor     = NavBg,
+            Padding       = new Padding(0, 8, 0, 0),
+        };
+
+        _contentHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.FormBg };
+        _contentHost.Resize += (_, _) => ApplyFluidWidth();
+
+        AddPage("start",  "Getting started", BuildGettingStartedPage);
+        AddPage("plugin", "Plugin Control",  BuildPluginPage);
+        AddPage("usage",  "Usage Limits",    BuildUsagePage);
+        AddPage("notify", "Notifications",   BuildNotificationsPage);
+        AddPage("about",  "About",           BuildAboutPage);
+
+        // Add the Fill host first (so it sits behind) and the Left rail second, so the rail claims
+        // its edge and the host fills the remainder.
+        Controls.Add(_contentHost);
+        Controls.Add(_navPanel);
+
+        _usageBars.SetOn(_settings.ShowUsage);
+        _usageBars.SetUsage(_usage);
+
+        SelectPage("start");
+    }
+
+    // Builds a page panel, runs its content builder, and registers the matching nav item.
+    private void AddPage(string key, string title, Action<FlowLayoutPanel> build)
+    {
+        var page = new FlowLayoutPanel
         {
             Dock          = DockStyle.Fill,
             FlowDirection = FlowDirection.TopDown,
             WrapContents  = false,
             AutoScroll    = true,
-            Padding       = new Padding(16),
+            Padding       = new Padding(PagePad),
             BackColor     = Theme.FormBg,
+            Visible       = false,
         };
-
-        BuildAboutSection(root);
-        root.Controls.Add(Separator());
-        BuildPermissionSection(root);
-        root.Controls.Add(Separator());
-        BuildPluginSection(root);
-        root.Controls.Add(Separator());
-        BuildUsageSection(root);
-        root.Controls.Add(Separator());
-        BuildNotificationsSection(root);
-        root.Controls.Add(Separator());
-        BuildExternalSection(root);
-        root.Controls.Add(Separator());
-        BuildUpdatesSection(root);
-
-        Controls.Add(root);
-
-        _usageBars.SetOn(_settings.ShowUsage);
-        _usageBars.SetUsage(_usage);
+        build(page);
+        _pages[key] = page;
+        _contentHost.Controls.Add(page);
+        AddNavItem(key, title);
     }
 
-    private void BuildAboutSection(FlowLayoutPanel root)
+    // A single nav rail entry: a full-width row with a left accent bar (shown when selected) and a
+    // left-aligned label. Hover lightens the background unless the row is the active page.
+    private void AddNavItem(string key, string title)
     {
-        root.Controls.Add(SectionTitle("About"));
-
-        var header = new FlowLayoutPanel
+        var item = new Panel
         {
-            FlowDirection = FlowDirection.LeftToRight,
-            WrapContents  = false,
-            AutoSize      = true,
-            AutoSizeMode  = AutoSizeMode.GrowAndShrink,
-            Margin        = new Padding(0, 0, 0, 6),
+            Width     = NavWidth,
+            Height    = 44,
+            Margin    = new Padding(0),
+            Cursor    = Cursors.Hand,
+            BackColor = NavBg,
         };
-        if (_icon != null)
-            header.Controls.Add(new PictureBox
-            {
-                Image    = _icon,
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Size     = new Size(32, 32),
-                Margin   = new Padding(0, 0, 10, 0),
-            });
-        header.Controls.Add(new Label
+        var accent = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = Theme.Accent, Visible = false };
+        var label  = new Label
         {
-            Text      = $"Claude Watch\nv{AppInfo.Version}",
-            AutoSize  = true,
-            ForeColor = Theme.Fg,
-            Margin    = new Padding(0, 2, 0, 0),
-        });
-        root.Controls.Add(header);
+            Text      = title,
+            Dock      = DockStyle.Fill,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Padding   = new Padding(16, 0, 8, 0),
+            ForeColor = Theme.Muted,
+            BackColor = NavBg,
+            Font      = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point),
+        };
+        item.Controls.Add(label);
+        item.Controls.Add(accent);
 
-        root.Controls.Add(LinkRow("GitHub repository", AppInfo.RepoUrl));
-        root.Controls.Add(LinkRow("Report an issue on GitHub", AppInfo.IssuesUrl));
+        void Select() => SelectPage(key);
+        item.Click  += (_, _) => Select();
+        label.Click += (_, _) => Select();
+
+        void Enter()
+        {
+            if (_currentKey == key) return;
+            item.BackColor = Theme.ButtonBg;
+            label.BackColor = Theme.ButtonBg;
+        }
+        void Leave()
+        {
+            if (_currentKey == key) return;
+            item.BackColor = NavBg;
+            label.BackColor = NavBg;
+        }
+        item.MouseEnter  += (_, _) => Enter();
+        item.MouseLeave  += (_, _) => Leave();
+        label.MouseEnter += (_, _) => Enter();
+        label.MouseLeave += (_, _) => Leave();
+
+        _navPanel.Controls.Add(item);
+        _navItems.Add((key, item, label, accent));
     }
 
+    // Shows the chosen page (hiding the rest) and restyles the nav rail to mark it active.
+    private void SelectPage(string key)
+    {
+        if (!_pages.TryGetValue(key, out var page)) return;
+        _currentKey = key;
+
+        foreach (var kv in _pages)
+            kv.Value.Visible = kv.Key == key;
+        page.BringToFront();
+
+        foreach (var (k, item, label, accent) in _navItems)
+        {
+            bool sel = k == key;
+            accent.Visible  = sel;
+            item.BackColor  = sel ? Theme.ButtonBg : NavBg;
+            label.BackColor = sel ? Theme.ButtonBg : NavBg;
+            label.ForeColor = sel ? Theme.Title    : Theme.Muted;
+        }
+
+        ApplyFluidWidth();
+    }
+
+    // The width available to full-width page controls: the content area minus page padding and a
+    // reserved vertical-scrollbar gutter (so a scrolling page never also shows a horizontal bar).
+    private int FluidWidth()
+    {
+        int w = _contentHost.ClientSize.Width - PagePad * 2 - (SystemInformation.VerticalScrollBarWidth + 4);
+        return Math.Max(200, w);
+    }
+
+    // Re-flows every registered full-width control to the current available width.
+    private void ApplyFluidWidth()
+    {
+        if (_contentHost is null) return;
+        int w = FluidWidth();
+        foreach (var (c, inset) in _fluidWidth)
+            c.Width = Math.Max(40, w - inset);
+        foreach (var l in _fluidWrap)
+            l.MaximumSize = new Size(w, 0);
+    }
+
+    // ── Getting started ─────────────────────────────────────────────────────────────
+    private void BuildGettingStartedPage(FlowLayoutPanel page)
+    {
+        BuildBanner(page);
+
+        page.Controls.Add(SectionTitle("What it does"));
+        page.Controls.Add(BodyText(
+            "•  See every active Claude Code session in one floating overlay — Idle, Running, or " +
+            "Needs Attention at a glance. Click a session to jump to its terminal; drag the overlay " +
+            "to dock it on the left or right."));
+        page.Controls.Add(BodyText(
+            "•  Get a desktop notification the moment a session finishes or is waiting on you."));
+        page.Controls.Add(BodyText(
+            "•  Push those same alerts to your phone or other devices via ntfy, so you're covered " +
+            "when you're away from your desk."));
+        page.Controls.Add(BodyText(
+            "•  Keep an eye on your 5-hour and weekly usage limits without leaving your desktop."));
+        page.Controls.Add(BodyText(
+            "•  Install the companion Claude Code plugin for live permission-mode badges, /afk, and " +
+            "/history."));
+
+        page.Controls.Add(Separator());
+
+        page.Controls.Add(SectionTitle("Permission mode badges"));
+        page.Controls.Add(BodyText(
+            "When the Claude Code plugin is installed, each session's live permission mode is shown " +
+            "as a coloured badge next to that session in the overlay:"));
+        var legend = new ModeLegend { Margin = new Padding(0, 2, 0, 8) };
+        _fluidWidth.Add((legend, 0));
+        page.Controls.Add(legend);
+    }
+
+    // Centred app banner: the logo, the app name, and the tagline, all horizontally centred and
+    // re-laid-out whenever the banner's width changes.
+    private void BuildBanner(FlowLayoutPanel page)
+    {
+        var banner = new Panel { Height = 156, Margin = new Padding(0, 8, 0, 8), BackColor = Theme.FormBg };
+
+        PictureBox? pic = _icon != null
+            ? new PictureBox { Image = _icon, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(64, 64) }
+            : null;
+        var name = new Label
+        {
+            Text      = "Claude Watch",
+            AutoSize  = true,
+            ForeColor = Theme.Title,
+            Font      = new Font("Segoe UI", 16f, FontStyle.Bold, GraphicsUnit.Point),
+        };
+        var tag = new Label
+        {
+            Text      = "Never miss what Claude's working on",
+            AutoSize  = true,
+            ForeColor = Theme.Muted,
+            Font      = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point),
+        };
+        if (pic != null) banner.Controls.Add(pic);
+        banner.Controls.Add(name);
+        banner.Controls.Add(tag);
+
+        void Layout()
+        {
+            int cx = banner.Width / 2;
+            int y  = 14;
+            if (pic != null) { pic.Location = new Point(cx - pic.Width / 2, y); y += pic.Height + 10; }
+            name.Location = new Point(cx - name.Width / 2, y); y += name.Height + 4;
+            tag.Location  = new Point(cx - tag.Width  / 2, y);
+        }
+        banner.Resize += (_, _) => Layout();
+        _fluidWidth.Add((banner, 0));
+        Layout();
+
+        page.Controls.Add(banner);
+    }
+
+    // ── Plugin Control ────────────────────────────────────────────────────────────
     // The install commands for the claude-watch Claude Code plugin (marketplace ref name@marketplace).
     private const string PluginInstallCommands =
         "/plugin marketplace add ArcticGizmo/claude-watch\n/plugin install claude-watch@claude-watch";
 
-    private void BuildPermissionSection(FlowLayoutPanel root)
-    {
-        root.Controls.Add(SectionTitle("Permission Mode"));
-
-        root.Controls.Add(BodyText(
-            "When the claude-watch Claude Code plugin is installed, each session's live permission " +
-            "mode is shown as a coloured badge next to that session in the overlay:"));
-
-        root.Controls.Add(new ModeLegend { Width = ContentWidth, Margin = new Padding(0, 2, 0, 8) });
-
-        root.Controls.Add(BodyText(
-            "The same plugin also adds /afk (toggle external notifications) and /history (open this " +
-            "session's history). Manage it in the “Claude Code plugin” section below."));
-    }
-
-    // ── Claude Code plugin section ────────────────────────────────────────────────
     // Status of the claude-watch plugin and the single action button (Enable / Update / Up to date).
     private Label   _pluginStatusLabel = null!;
     private Button  _pluginActionBtn   = null!;
@@ -191,11 +348,21 @@ internal sealed class SettingsForm : Form
     // One-click install/update of the claude-watch plugin via the claude CLI. The button's label and
     // enabled-state follow an async status check (spinner shown while it runs); the manual commands
     // remain below as a fallback when the CLI isn't on PATH.
-    private void BuildPluginSection(FlowLayoutPanel root)
+    private void BuildPluginPage(FlowLayoutPanel page)
     {
-        root.Controls.Add(SectionTitle("Claude Code plugin"));
+        page.Controls.Add(SectionTitle("Plugin Control"));
 
-        root.Controls.Add(BodyText(
+        page.Controls.Add(BodyText(
+            "Claude Watch pairs with a small Claude Code plugin. With it installed you get:"));
+        page.Controls.Add(BodyText(
+            "•  Live permission-mode badges next to each session in the overlay — Plan, Accept edits, " +
+            "Auto, and Bypass."));
+        page.Controls.Add(BodyText(
+            "•  /afk — toggle external (phone) notifications for the current session without leaving " +
+            "Claude Code."));
+        page.Controls.Add(BodyText(
+            "•  /history — open the current session's history in Claude Watch."));
+        page.Controls.Add(BodyText(
             "Claude Watch can add the marketplace and install the plugin for you. If a newer version " +
             "is published later, use Update to pull it in."));
 
@@ -208,19 +375,19 @@ internal sealed class SettingsForm : Form
 
         _pluginSpinner = new Spinner { Margin = new Padding(2, 4, 0, 0) };
         row.Controls.Add(_pluginSpinner);
-        root.Controls.Add(row);
+        page.Controls.Add(row);
 
         _pluginStatusLabel = BodyText("Checking plugin status…");
-        root.Controls.Add(_pluginStatusLabel);
+        page.Controls.Add(_pluginStatusLabel);
 
         // Manual fallback for when the CLI isn't reachable from the app.
-        root.Controls.Add(FieldCaption("Or run these in any Claude Code session:"));
-        root.Controls.Add(CodeBlock(PluginInstallCommands));
+        page.Controls.Add(FieldCaption("Or run these in any Claude Code session:"));
+        page.Controls.Add(CodeBlock(PluginInstallCommands));
         var copyRow = ButtonRow();
         var copyBtn = MakeButton("Copy install commands");
         copyBtn.Click += (_, _) => { try { Clipboard.SetText(PluginInstallCommands); } catch { } };
         copyRow.Controls.Add(copyBtn);
-        root.Controls.Add(copyRow);
+        page.Controls.Add(copyRow);
 
         // Kick off the initial status check (don't block the UI thread building the form).
         _ = RefreshPluginStatusAsync();
@@ -299,7 +466,8 @@ internal sealed class SettingsForm : Form
         }
     }
 
-    private void BuildUsageSection(FlowLayoutPanel root)
+    // ── Usage ───────────────────────────────────────────────────────────────────────
+    private void BuildUsagePage(FlowLayoutPanel page)
     {
         _usageToggle = MakeToggle();
         _usageToggle.Checked = _settings.ShowUsage;
@@ -309,12 +477,13 @@ internal sealed class SettingsForm : Form
             _usageRefreshBtn.Enabled = _usageToggle.Checked;
             _usageBars.SetOn(_usageToggle.Checked);
         };
-        root.Controls.Add(TitleRow("Usage limits", _usageToggle));
+        page.Controls.Add(TitleRow("Usage limits", _usageToggle));
 
-        root.Controls.Add(BodyText("Your account-wide 5-hour and weekly rate-limit usage."));
+        page.Controls.Add(BodyText("Your account-wide 5-hour and weekly rate-limit usage."));
 
-        _usageBars = new UsageBarsControl { Width = ContentWidth, Margin = new Padding(0, 2, 0, 6) };
-        root.Controls.Add(_usageBars);
+        _usageBars = new UsageBarsControl { Margin = new Padding(0, 2, 0, 6) };
+        _fluidWidth.Add((_usageBars, 0));
+        page.Controls.Add(_usageBars);
 
         var row = ButtonRow();
         _usageRefreshBtn = MakeButton("Refresh");
@@ -329,10 +498,11 @@ internal sealed class SettingsForm : Form
             _usageRefreshBtn.Enabled = _settings.ShowUsage;
         };
         row.Controls.Add(_usageRefreshBtn);
-        root.Controls.Add(row);
+        page.Controls.Add(row);
     }
 
-    private void BuildNotificationsSection(FlowLayoutPanel root)
+    // ── Notifications (Windows desktop + external ntfy) ──────────────────────────────
+    private void BuildNotificationsPage(FlowLayoutPanel page)
     {
         _notifyMasterToggle = MakeToggle();
         _notifyMasterToggle.Checked = _settings.NotificationsEnabled;
@@ -342,25 +512,29 @@ internal sealed class SettingsForm : Form
             _settings.Save();
             ApplyNotifyEnabled();
         };
-        root.Controls.Add(TitleRow("Notifications", _notifyMasterToggle));
+        page.Controls.Add(TitleRow("Notifications", _notifyMasterToggle));
 
-        root.Controls.Add(BodyText(
+        page.Controls.Add(BodyText(
             "Windows desktop notifications when a session needs you. Turn the whole feature off, " +
             "or just the types you don't want. Use Test to preview one."));
 
-        root.Controls.Add(BuildNotifyRow(
+        page.Controls.Add(BuildNotifyRow(
             "Done — a session finished working",
             _settings.NotifyOnDone,
             v => { _settings.NotifyOnDone = v; _settings.Save(); },
             NotificationKind.Done));
 
-        root.Controls.Add(BuildNotifyRow(
+        page.Controls.Add(BuildNotifyRow(
             "Waiting for input — a session is blocked on a prompt",
             _settings.NotifyOnWaitingInput,
             v => { _settings.NotifyOnWaitingInput = v; _settings.Save(); },
             NotificationKind.WaitingForInput));
 
         ApplyNotifyEnabled();
+
+        page.Controls.Add(Separator());
+
+        BuildExternalSection(page);
     }
 
     // An indented sub-row for one notification type: a label, a "Test" button, and a toggle on the
@@ -369,7 +543,6 @@ internal sealed class SettingsForm : Form
     {
         var row = new Panel
         {
-            Width  = ContentWidth,
             Height = 30,
             Margin = new Padding(0, 2, 0, 4),
         };
@@ -385,8 +558,6 @@ internal sealed class SettingsForm : Form
         var toggle = MakeToggle();
         toggle.Checked  = initial;
         toggle.CheckedChanged += (_, _) => onChanged(toggle.Checked);
-        toggle.Location = new Point(ContentWidth - toggle.Width, (row.Height - toggle.Height) / 2);
-        toggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
 
         var test = MakeButton("Test");
         test.AutoSize  = false;
@@ -394,13 +565,21 @@ internal sealed class SettingsForm : Form
         test.Margin    = new Padding(0);
         test.Padding   = new Padding(0);
         test.TextAlign = ContentAlignment.MiddleCenter;
-        test.Location  = new Point(toggle.Left - test.Width - 12, (row.Height - test.Height) / 2);
-        test.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
         test.Click   += (_, _) => TestNotificationRequested?.Invoke(kind);
 
         row.Controls.Add(label);
         row.Controls.Add(test);
         row.Controls.Add(toggle);
+
+        // Right-align the toggle and Test button to the row's current width whenever it changes.
+        void Position()
+        {
+            toggle.Location = new Point(row.Width - toggle.Width, (row.Height - toggle.Height) / 2);
+            test.Location   = new Point(toggle.Left - test.Width - 12, (row.Height - test.Height) / 2);
+        }
+        row.Resize += (_, _) => Position();
+        _fluidWidth.Add((row, 0));
+        Position();
 
         _notifySubRows.Add((label, toggle, test));
         return row;
@@ -421,7 +600,7 @@ internal sealed class SettingsForm : Form
     // External notifications via ntfy. The toggle only gates whether pushes are sent (and whether
     // the per-session opt-in is offered in the overlay); the host/topic boxes stay enabled either
     // way so they can be filled in and tested before turning the feature on.
-    private void BuildExternalSection(FlowLayoutPanel root)
+    private void BuildExternalSection(FlowLayoutPanel page)
     {
         _externalToggle = MakeToggle();
         _externalToggle.Checked = _settings.ExternalNotificationsEnabled;
@@ -432,9 +611,9 @@ internal sealed class SettingsForm : Form
             ApplyExternalEnabled();
             ExternalNotificationsEnabledChanged?.Invoke(_externalToggle.Checked);
         };
-        root.Controls.Add(TitleRow("External notifications", _externalToggle));
+        page.Controls.Add(TitleRow("External notifications", _externalToggle));
 
-        root.Controls.Add(BodyText(
+        page.Controls.Add(BodyText(
             "Also push \"Done\" and \"Waiting for input\" alerts to your phone or other devices via " +
             "ntfy. Enter your server and topic below, then enable it per session by right-clicking " +
             "that session in the overlay."));
@@ -444,13 +623,14 @@ internal sealed class SettingsForm : Form
         string host = string.IsNullOrWhiteSpace(_settings.NtfyHost) ? "https://ntfy.sh" : _settings.NtfyHost!;
         _settings.NtfyHost = host;
 
-        root.Controls.Add(FieldCaption("Server URL"));
+        page.Controls.Add(FieldCaption("Server URL"));
         _ntfyHostBox = MakeTextBox(host);
+        _fluidWidth.Add((_ntfyHostBox, 0));
         _ntfyHostBox.TextChanged += (_, _) => _settings.NtfyHost = _ntfyHostBox.Text;
         _ntfyHostBox.Leave       += (_, _) => _settings.Save();
-        root.Controls.Add(_ntfyHostBox);
+        page.Controls.Add(_ntfyHostBox);
 
-        root.Controls.Add(FieldCaption("Topic"));
+        page.Controls.Add(FieldCaption("Topic"));
 
         // Topic box with two helpers beside it: "Generate" mints a hard-to-guess 64-char topic, and
         // "QR code" shows an ntfy:// subscribe link for scanning on a phone.
@@ -464,8 +644,10 @@ internal sealed class SettingsForm : Form
         };
 
         _ntfyTopicBox = MakeTextBox(_settings.NtfyTopic ?? "");
-        _ntfyTopicBox.Width  = ContentWidth - 180;
         _ntfyTopicBox.Margin = new Padding(0, 0, 8, 0);
+        // The topic box shares its row with the Generate (86) + QR (78) buttons and their margins,
+        // so it gets the available width less ~180px.
+        _fluidWidth.Add((_ntfyTopicBox, 180));
         _ntfyTopicBox.TextChanged += (_, _) => _settings.NtfyTopic = _ntfyTopicBox.Text;
         _ntfyTopicBox.Leave       += (_, _) => _settings.Save();
 
@@ -492,17 +674,17 @@ internal sealed class SettingsForm : Form
         topicRow.Controls.Add(_ntfyTopicBox);
         topicRow.Controls.Add(genBtn);
         topicRow.Controls.Add(qrBtn);
-        root.Controls.Add(topicRow);
+        page.Controls.Add(topicRow);
 
-        root.Controls.Add(BuildLockNotifyRow());
-        root.Controls.Add(BuildRemoteLinkRow());
+        page.Controls.Add(BuildLockNotifyRow());
+        page.Controls.Add(BuildRemoteLinkRow());
 
         var row = ButtonRow();
         row.Margin = new Padding(0, 4, 0, 4);
         var testBtn = MakeButton("Send test notification");
         testBtn.Click += (_, _) => { _settings.Save(); TestExternalNotificationRequested?.Invoke(); };
         row.Controls.Add(testBtn);
-        root.Controls.Add(row);
+        page.Controls.Add(row);
 
         ApplyExternalEnabled();
     }
@@ -514,7 +696,6 @@ internal sealed class SettingsForm : Form
     {
         var row = new Panel
         {
-            Width  = ContentWidth,
             Height = 30,
             Margin = new Padding(0, 2, 0, 4),
         };
@@ -534,11 +715,15 @@ internal sealed class SettingsForm : Form
             _settings.NotifyWhenLocked = _lockNotifyToggle.Checked;
             _settings.Save();
         };
-        _lockNotifyToggle.Location = new Point(ContentWidth - _lockNotifyToggle.Width, (row.Height - _lockNotifyToggle.Height) / 2);
-        _lockNotifyToggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
 
         row.Controls.Add(_lockNotifyLabel);
         row.Controls.Add(_lockNotifyToggle);
+
+        void Position() =>
+            _lockNotifyToggle.Location = new Point(row.Width - _lockNotifyToggle.Width, (row.Height - _lockNotifyToggle.Height) / 2);
+        row.Resize += (_, _) => Position();
+        _fluidWidth.Add((row, 0));
+        Position();
         return row;
     }
 
@@ -549,7 +734,6 @@ internal sealed class SettingsForm : Form
     {
         var row = new Panel
         {
-            Width  = ContentWidth,
             Height = 30,
             Margin = new Padding(0, 2, 0, 4),
         };
@@ -569,11 +753,15 @@ internal sealed class SettingsForm : Form
             _settings.ExternalNotificationsIncludeRemoteLink = _remoteLinkToggle.Checked;
             _settings.Save();
         };
-        _remoteLinkToggle.Location = new Point(ContentWidth - _remoteLinkToggle.Width, (row.Height - _remoteLinkToggle.Height) / 2);
-        _remoteLinkToggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
 
         row.Controls.Add(_remoteLinkLabel);
         row.Controls.Add(_remoteLinkToggle);
+
+        void Position() =>
+            _remoteLinkToggle.Location = new Point(row.Width - _remoteLinkToggle.Width, (row.Height - _remoteLinkToggle.Height) / 2);
+        row.Resize += (_, _) => Position();
+        _fluidWidth.Add((row, 0));
+        Position();
         return row;
     }
 
@@ -622,17 +810,50 @@ internal sealed class SettingsForm : Form
         _topicQrForm.Activate();
     }
 
-    private void BuildUpdatesSection(FlowLayoutPanel root)
+    // ── About ─────────────────────────────────────────────────────────────────────
+    private void BuildAboutPage(FlowLayoutPanel page)
     {
-        root.Controls.Add(SectionTitle("Updates"));
-        root.Controls.Add(BodyText($"Currently running v{AppInfo.Version}."));
+        page.Controls.Add(SectionTitle("About"));
+
+        var header = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents  = false,
+            AutoSize      = true,
+            AutoSizeMode  = AutoSizeMode.GrowAndShrink,
+            Margin        = new Padding(0, 0, 0, 6),
+        };
+        if (_icon != null)
+            header.Controls.Add(new PictureBox
+            {
+                Image    = _icon,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Size     = new Size(32, 32),
+                Margin   = new Padding(0, 0, 10, 0),
+            });
+        header.Controls.Add(new Label
+        {
+            Text      = $"Claude Watch\nv{AppInfo.Version}",
+            AutoSize  = true,
+            ForeColor = Theme.Fg,
+            Margin    = new Padding(0, 2, 0, 0),
+        });
+        page.Controls.Add(header);
+
+        page.Controls.Add(LinkRow("GitHub repository", AppInfo.RepoUrl));
+        page.Controls.Add(LinkRow("Report an issue on GitHub", AppInfo.IssuesUrl));
+
+        page.Controls.Add(Separator());
+
+        page.Controls.Add(SectionTitle("Updates"));
+        page.Controls.Add(BodyText($"Currently running v{AppInfo.Version}."));
 
         var row = ButtonRow();
-        row.Margin = new Padding(0, 0, 0, 24);  // breathing room at the bottom of the window
+        row.Margin = new Padding(0, 0, 0, 24);  // breathing room at the bottom of the page
         var checkBtn = MakeButton("Check for Updates");
         checkBtn.Click += (_, _) => CheckForUpdatesRequested?.Invoke(this, EventArgs.Empty);
         row.Controls.Add(checkBtn);
-        root.Controls.Add(row);
+        page.Controls.Add(row);
     }
 
     // ── Public updates from the owner ────────────────────────────────────────────
@@ -654,13 +875,12 @@ internal sealed class SettingsForm : Form
         Margin    = new Padding(0, 4, 0, 8),
     };
 
-    // A section header with a right-justified toggle on the same row, optionally with a spinner
-    // sitting just to the left of the toggle.
+    // A section header with a right-justified toggle on the same row. The toggle is re-positioned
+    // to the row's right edge whenever the row width changes.
     private Panel TitleRow(string title, ToggleSwitch toggle)
     {
         var row = new Panel
         {
-            Width  = ContentWidth,
             Height = 30,
             Margin = new Padding(0, 4, 0, 8),
         };
@@ -672,10 +892,13 @@ internal sealed class SettingsForm : Form
             Font      = new Font("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point),
             Location  = new Point(0, 2),
         };
-        toggle.Location = new Point(ContentWidth - toggle.Width, (row.Height - toggle.Height) / 2);
-        toggle.Anchor   = AnchorStyles.Top | AnchorStyles.Right;
         row.Controls.Add(label);
         row.Controls.Add(toggle);
+
+        void Position() => toggle.Location = new Point(row.Width - toggle.Width, (row.Height - toggle.Height) / 2);
+        row.Resize += (_, _) => Position();
+        _fluidWidth.Add((row, 0));
+        Position();
         return row;
     }
 
@@ -690,11 +913,12 @@ internal sealed class SettingsForm : Form
         Margin    = new Padding(0, 2, 0, 2),
     };
 
-    // A dark-themed single-line text box matching the rest of the settings surface.
-    private static TextBox MakeTextBox(string value) => new()
+    // A dark-themed single-line text box matching the rest of the settings surface. Width is managed
+    // by the fluid-layout pass; callers register it in _fluidWidth.
+    private TextBox MakeTextBox(string value) => new()
     {
         Text        = value,
-        Width       = ContentWidth,
+        Width       = 480,
         BackColor   = Theme.ButtonBg,
         ForeColor   = Theme.Fg,
         BorderStyle = BorderStyle.FixedSingle,
@@ -702,27 +926,38 @@ internal sealed class SettingsForm : Form
         Margin      = new Padding(0, 0, 0, 8),
     };
 
-    private static Label BodyText(string text) => new()
+    // A wrapping body paragraph; registered so its wrap width tracks the content area.
+    private Label BodyText(string text)
     {
-        Text        = text,
-        AutoSize    = true,
-        MaximumSize = new Size(ContentWidth, 0),  // wrap long lines, auto height
-        ForeColor   = Theme.Muted,
-        Margin      = new Padding(0, 0, 0, 6),
-    };
+        var l = new Label
+        {
+            Text        = text,
+            AutoSize    = true,
+            MaximumSize = new Size(480, 0),  // updated by ApplyFluidWidth
+            ForeColor   = Theme.Muted,
+            Margin      = new Padding(0, 0, 0, 6),
+        };
+        _fluidWrap.Add(l);
+        return l;
+    }
 
     // A monospace, boxed block for copy-pasteable commands.
-    private static Label CodeBlock(string text) => new()
+    private Label CodeBlock(string text)
     {
-        Text        = text,
-        AutoSize    = true,
-        MaximumSize = new Size(ContentWidth, 0),
-        Font        = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point),
-        ForeColor   = Theme.Fg,
-        BackColor   = Color.FromArgb(34, 34, 44),
-        Padding     = new Padding(10, 8, 10, 8),
-        Margin      = new Padding(0, 0, 0, 8),
-    };
+        var l = new Label
+        {
+            Text        = text,
+            AutoSize    = true,
+            MaximumSize = new Size(480, 0),
+            Font        = new Font("Consolas", 9.5f, FontStyle.Regular, GraphicsUnit.Point),
+            ForeColor   = Theme.Fg,
+            BackColor   = Color.FromArgb(34, 34, 44),
+            Padding     = new Padding(10, 8, 10, 8),
+            Margin      = new Padding(0, 0, 0, 8),
+        };
+        _fluidWrap.Add(l);
+        return l;
+    }
 
     private LinkLabel LinkRow(string text, string url)
     {
@@ -741,13 +976,18 @@ internal sealed class SettingsForm : Form
         return link;
     }
 
-    private static Panel Separator() => new()
+    private Panel Separator()
     {
-        Height    = 1,
-        Width     = ContentWidth,
-        BackColor = Theme.Border,
-        Margin    = new Padding(0, 12, 0, 12),
-    };
+        var p = new Panel
+        {
+            Height    = 1,
+            Width     = 480,
+            BackColor = Theme.Border,
+            Margin    = new Padding(0, 12, 0, 12),
+        };
+        _fluidWidth.Add((p, 0));
+        return p;
+    }
 
     private static FlowLayoutPanel ButtonRow() => new()
     {
