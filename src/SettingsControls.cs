@@ -131,6 +131,65 @@ internal sealed class ToggleSwitch : Control
     }
 }
 
+/// <summary>A small indeterminate spinner: a rotating accent arc on a faint track. Only animates
+/// (and only consumes a timer) while <see cref="Spinning"/> is true and the control is visible.</summary>
+internal sealed class Spinner : Control
+{
+    private readonly System.Windows.Forms.Timer _timer;
+    private int _angle;
+    private bool _spinning;
+
+    public Spinner()
+    {
+        Size           = new Size(18, 18);
+        DoubleBuffered = true;
+        TabStop        = false;
+        BackColor      = Theme.FormBg;
+        Visible        = false;
+        _timer = new System.Windows.Forms.Timer { Interval = 60 };
+        _timer.Tick += (_, _) => { _angle = (_angle + 30) % 360; Invalidate(); };
+    }
+
+    /// <summary>Start/stop the animation. Also toggles visibility so the spinner only shows while busy.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(
+        System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public bool Spinning
+    {
+        get => _spinning;
+        set
+        {
+            if (_spinning == value) return;
+            _spinning = value;
+            Visible   = value;
+            if (value) _timer.Start(); else _timer.Stop();
+            Invalidate();
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        if (!_spinning) return;
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        float pad = 2.5f;
+        var rect = new RectangleF(pad, pad, Width - pad * 2, Height - pad * 2);
+        float thickness = Math.Max(2f, Width / 9f);
+
+        using var track = new Pen(Theme.Border, thickness);
+        g.DrawArc(track, rect, 0, 360);
+
+        using var arc = new Pen(Theme.Accent, thickness) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        g.DrawArc(arc, rect, _angle, 100);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _timer.Dispose();
+        base.Dispose(disposing);
+    }
+}
+
 /// <summary>Renders the 5-hour ("Session") and 7-day ("Weekly") usage windows as labelled
 /// progress bars, matching the overlay's bars for consistency. Shows a placeholder line when
 /// usage tracking is off or no reading is available yet.</summary>

@@ -122,6 +122,34 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _usageTimer.Start();
             RefreshUsage();
         }
+
+        // First launch after an install: add the marketplace and install the Claude Code plugin in
+        // the background so the user doesn't have to. Failures are silently skipped (treated as ok).
+        if (Program.IsFirstRun)
+            AutoInstallPlugin();
+    }
+
+    // Fire-and-forget plugin install on first run. Shows a tray balloon up front so the work is
+    // visible, then a quiet success balloon; any failure is swallowed (the user can still enable it
+    // later from Settings).
+    private async void AutoInstallPlugin()
+    {
+        // Already set up from a previous machine state? Skip the work and the noise.
+        var (marketplace, plugin) = PluginManager.ReadInstalledState();
+        if (marketplace && plugin)
+            return;
+
+        ShowInfoBalloon("Claude Watch",
+            "Setting up the Claude Code plugin…", ToolTipIcon.Info);
+
+        try
+        {
+            var (ok, _) = await new PluginManager().EnableAsync();
+            if (ok)
+                ShowInfoBalloon("Claude Watch",
+                    "Claude Code plugin installed. Restart open sessions to load it.", ToolTipIcon.Info);
+        }
+        catch { /* best-effort: skip on any failure */ }
     }
 
     // Opens (or re-focuses) the settings window, wiring it to the shared state and callbacks.

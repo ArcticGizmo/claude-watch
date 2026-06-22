@@ -113,6 +113,8 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(Separator());
         BuildPermissionSection(root);
         root.Controls.Add(Separator());
+        BuildPluginSection(root);
+        root.Controls.Add(Separator());
         BuildUsageSection(root);
         root.Controls.Add(Separator());
         BuildNotificationsSection(root);
@@ -176,15 +178,125 @@ internal sealed class SettingsForm : Form
 
         root.Controls.Add(BodyText(
             "The same plugin also adds /afk (toggle external notifications) and /history (open this " +
-            "session's history). Install it once per machine by running these in any Claude Code session:"));
+            "session's history). Manage it in the “Claude Code plugin” section below."));
+    }
 
-        root.Controls.Add(CodeBlock(PluginInstallCommands));
+    // ── Claude Code plugin section ────────────────────────────────────────────────
+    // Status of the claude-watch plugin and the single action button (Enable / Update / Up to date).
+    private Label   _pluginStatusLabel = null!;
+    private Button  _pluginActionBtn   = null!;
+    private Spinner _pluginSpinner     = null!;
+    private PluginStatus _pluginStatus = PluginStatus.UpToDate;
 
+    // One-click install/update of the claude-watch plugin via the claude CLI. The button's label and
+    // enabled-state follow an async status check (spinner shown while it runs); the manual commands
+    // remain below as a fallback when the CLI isn't on PATH.
+    private void BuildPluginSection(FlowLayoutPanel root)
+    {
+        root.Controls.Add(SectionTitle("Claude Code plugin"));
+
+        root.Controls.Add(BodyText(
+            "Claude Watch can add the marketplace and install the plugin for you. If a newer version " +
+            "is published later, use Update to pull it in."));
+
+        // Action row: the Enable/Update button with a spinner beside it while a check or install runs.
         var row = ButtonRow();
+        _pluginActionBtn = MakeButton("Enable");
+        _pluginActionBtn.Enabled = false;
+        _pluginActionBtn.Click += async (_, _) => await RunPluginActionAsync();
+        row.Controls.Add(_pluginActionBtn);
+
+        _pluginSpinner = new Spinner { Margin = new Padding(2, 4, 0, 0) };
+        row.Controls.Add(_pluginSpinner);
+        root.Controls.Add(row);
+
+        _pluginStatusLabel = BodyText("Checking plugin status…");
+        root.Controls.Add(_pluginStatusLabel);
+
+        // Manual fallback for when the CLI isn't reachable from the app.
+        root.Controls.Add(FieldCaption("Or run these in any Claude Code session:"));
+        root.Controls.Add(CodeBlock(PluginInstallCommands));
+        var copyRow = ButtonRow();
         var copyBtn = MakeButton("Copy install commands");
         copyBtn.Click += (_, _) => { try { Clipboard.SetText(PluginInstallCommands); } catch { } };
-        row.Controls.Add(copyBtn);
-        root.Controls.Add(row);
+        copyRow.Controls.Add(copyBtn);
+        root.Controls.Add(copyRow);
+
+        // Kick off the initial status check (don't block the UI thread building the form).
+        _ = RefreshPluginStatusAsync();
+    }
+
+    // Runs the async status check, driving the spinner and then the button/label.
+    private async Task RefreshPluginStatusAsync()
+    {
+        SetPluginBusy("Checking plugin status…");
+        var status = await new PluginManager().GetStatusAsync();
+        if (IsDisposed) return;
+        ApplyPluginStatus(status);
+    }
+
+    // Runs Enable or Update depending on the current status, then re-checks to refresh the button.
+    private async Task RunPluginActionAsync()
+    {
+        var mgr = new PluginManager();
+        bool updating = _pluginStatus == PluginStatus.UpdateAvailable;
+        SetPluginBusy(updating ? "Updating the plugin…" : "Installing the plugin…");
+
+        var (ok, message) = updating ? await mgr.UpdateAsync() : await mgr.EnableAsync();
+        if (IsDisposed) return;
+
+        if (!ok)
+        {
+            // Surface the failure but re-enable the button so the user can retry.
+            _pluginSpinner.Spinning = false;
+            _pluginStatusLabel.Text = message;
+            _pluginActionBtn.Enabled = true;
+            return;
+        }
+
+        // Re-check so the button settles to "Up to date" (or surfaces any remaining work).
+        await RefreshPluginStatusAsync();
+        if (!IsDisposed)
+            _pluginStatusLabel.Text = message;
+    }
+
+    // Shows the spinner and disables the button while an async plugin operation is in flight.
+    private void SetPluginBusy(string message)
+    {
+        _pluginSpinner.Spinning  = true;
+        _pluginActionBtn.Enabled = false;
+        _pluginStatusLabel.Text  = message;
+    }
+
+    // Maps a resolved status onto the button label/enabled-state and the status caption.
+    private void ApplyPluginStatus(PluginStatus status)
+    {
+        _pluginStatus = status;
+        _pluginSpinner.Spinning = false;
+
+        switch (status)
+        {
+            case PluginStatus.NeedsEnable:
+                _pluginActionBtn.Text    = "Enable";
+                _pluginActionBtn.Enabled = true;
+                _pluginStatusLabel.Text  = "Not installed yet.";
+                break;
+            case PluginStatus.UpdateAvailable:
+                _pluginActionBtn.Text    = "Update";
+                _pluginActionBtn.Enabled = true;
+                _pluginStatusLabel.Text  = "A newer version is available.";
+                break;
+            case PluginStatus.UpToDate:
+                _pluginActionBtn.Text    = "Up to date";
+                _pluginActionBtn.Enabled = false;
+                _pluginStatusLabel.Text  = "Installed and up to date.";
+                break;
+            case PluginStatus.CliMissing:
+                _pluginActionBtn.Text    = "Enable";
+                _pluginActionBtn.Enabled = false;
+                _pluginStatusLabel.Text  = "claude CLI not found on PATH — run the commands below manually.";
+                break;
+        }
     }
 
     private void BuildUsageSection(FlowLayoutPanel root)
