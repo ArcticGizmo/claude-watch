@@ -36,7 +36,7 @@ jobs:
             -o publish/
 
       - name: Pack with Velopack
-        run: vpk pack --packId ClaudeWatch --packVersion ${{ steps.version.outputs.VERSION }} --packDir publish/ --mainExe ClaudeWatch.exe --outputDir releases/
+        run: vpk pack --packId ClaudeWatch --packTitle "Claude Watch" --packVersion ${{ steps.version.outputs.VERSION }} --packDir publish/ --mainExe claude-watch.exe --outputDir releases/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -47,7 +47,7 @@ if (-not $exe) {
   $exe = (Get-Command 'claude-watch' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 }
 if (-not $exe) {
-  $fallback = Join-Path $env:LOCALAPPDATA 'ClaudeWatch\current\ClaudeWatch.exe'
+  $fallback = Join-Path $env:LOCALAPPDATA 'ClaudeWatch\current\claude-watch.exe'
   if (Test-Path $fallback) { $exe = $fallback }
 }
 if (-not $exe) { exit 0 }  # not installed — let the prompt through / no-op

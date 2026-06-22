@@ -8,7 +8,7 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
-        // `ClaudeWatch.exe handle <event>` runs as a CLI for the plugin's hooks (read stdin, act,
+        // `claude-watch.exe handle <event>` runs as a CLI for the plugin's hooks (read stdin, act,
         // print, exit) and never starts the tray UI.
         if (args.Length > 0 && string.Equals(args[0], "handle", StringComparison.OrdinalIgnoreCase))
         {
@@ -16,7 +16,8 @@ internal static class Program
             return;
         }
 
-        VelopackApp.Build()
+        VelopackApp
+            .Build()
             .OnAfterInstallFastCallback(_ => PathRegistration.Register())
             .OnAfterUpdateFastCallback(_ => PathRegistration.Register())
             .OnBeforeUninstallFastCallback(_ => PathRegistration.Unregister())

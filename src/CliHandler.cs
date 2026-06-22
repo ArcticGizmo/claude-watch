@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace ClaudeWatch;
 
 /// <summary>
-/// Command-line entry point for <c>ClaudeWatch.exe handle &lt;event&gt;</c>. Lets the claude-watch
+/// Command-line entry point for <c>claude-watch.exe handle &lt;event&gt;</c>. Lets the claude-watch
 /// plugin's Claude Code hooks drive the tray app's session sidecar files directly, so all command
 /// logic lives here in first-class C# instead of being duplicated in PowerShell.
 ///
@@ -134,14 +134,14 @@ internal static partial class CliHandler
         }
     }
 
-    // The tray instance is any *other* ClaudeWatch process — this short-lived `handle` invocation is
-    // itself named ClaudeWatch, so it must be excluded.
+    // The tray instance is any *other* claude-watch process — this short-lived `handle` invocation is
+    // itself named claude-watch, so it must be excluded.
     private static bool IsTrayRunning()
     {
         int me = Environment.ProcessId;
         try
         {
-            return Process.GetProcessesByName("ClaudeWatch").Any(p => p.Id != me);
+            return Process.GetProcessesByName("claude-watch").Any(p => p.Id != me);
         }
         catch
         {
