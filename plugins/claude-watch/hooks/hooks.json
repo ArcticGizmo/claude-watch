@@ -76,6 +76,25 @@
         ]
       }
     ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/scripts/invoke.ps1",
+              "start"
+            ]
+          }
+        ]
+      }
+    ],
     "SessionEnd": [
       {
         "matcher": "",

@@ -12,12 +12,23 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // Account-wide rate-limit usage changes slowly; poll on startup then every 5 minutes.
     private const int UsageIntervalMs = 300_000;
 
+    // Grace period after the last session ends before an auto-started tray closes itself, so a quick
+    // session restart/compact (or opening the next session) doesn't tear the tray down and back up.
+    private const int AutoCloseGraceMs = 20_000;
+
     private readonly OverlayForm _overlay;
     private readonly SessionMonitor _monitor;
     private readonly UsageMonitor _usageMonitor = new();
     private readonly System.Windows.Forms.Timer _reconcileTimer;
     private readonly System.Windows.Forms.Timer _deadlineTimer;
     private readonly System.Windows.Forms.Timer _usageTimer;
+
+    // One-shot grace timer for "auto-close after last session" (see AutoCloseGraceMs).
+    private readonly System.Windows.Forms.Timer _autoCloseTimer;
+
+    // Latched once we've observed at least one live session, so the startup race (the tray launches
+    // before the opening session's file appears) can't trigger an immediate auto-close.
+    private bool _seenSession;
     private readonly NotifyIcon _notifyIcon;
     private readonly AppSettings _settings;
 
@@ -107,6 +118,16 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         // the feature is enabled — when off, no OAuth query is ever made.
         _usageTimer = new System.Windows.Forms.Timer { Interval = UsageIntervalMs };
         _usageTimer.Tick += (_, _) => RefreshUsage();
+
+        // Fires once, AutoCloseGraceMs after the last session ends. If still no sessions by then,
+        // an auto-started tray exits. Armed/cancelled from OnSessionsChanged.
+        _autoCloseTimer = new System.Windows.Forms.Timer { Interval = AutoCloseGraceMs };
+        _autoCloseTimer.Tick += (_, _) =>
+        {
+            _autoCloseTimer.Stop();
+            if (_sessions.Count == 0)
+                Exit();
+        };
 
         _overlay.Show();
         _overlay.SetUsageEnabled(_settings.ShowUsage);
@@ -254,6 +275,35 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             1 => "Claude Watch — 1 session",
             _ => $"Claude Watch — {sessions.Count} sessions",
         };
+
+        MaybeHandleAutoClose(sessions.Count);
+    }
+
+    // Auto-close: only an auto-started tray with the setting on ever closes itself. Once at least one
+    // session has been seen, dropping back to zero arms the grace timer; any session reappearing
+    // cancels it. The setting is read live, so toggling it in settings takes effect immediately.
+    private void MaybeHandleAutoClose(int sessionCount)
+    {
+        if (!Program.AutoStarted || !_settings.AutoCloseAfterLastSession)
+        {
+            _autoCloseTimer.Stop();
+            return;
+        }
+
+        if (sessionCount > 0)
+        {
+            _seenSession = true;
+            _autoCloseTimer.Stop();
+            return;
+        }
+
+        // Zero sessions: hold off until we've actually seen one (don't exit during the startup race),
+        // then start the grace countdown. Restart it from scratch on each zero reading.
+        if (!_seenSession)
+            return;
+
+        _autoCloseTimer.Stop();
+        _autoCloseTimer.Start();
     }
 
     // Marshals a re-scan onto the UI thread. SessionMonitor raises ChangeDetected from
@@ -484,6 +534,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _reconcileTimer.Stop();
         _deadlineTimer.Stop();
         _usageTimer.Stop();
+        _autoCloseTimer.Stop();
         _notifyIcon.Visible = false;
         if (_settingsForm is { IsDisposed: false })
             _settingsForm.Close();
@@ -499,6 +550,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _reconcileTimer.Dispose();
             _deadlineTimer.Dispose();
             _usageTimer.Dispose();
+            _autoCloseTimer.Dispose();
             _monitor.Dispose();
             _lockMonitor.Dispose();
             _notifyIcon.Icon?.Dispose();

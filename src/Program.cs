@@ -7,6 +7,11 @@ internal static class Program
     // this to auto-install the Claude Code plugin once, without the user having to think about it.
     public static bool IsFirstRun { get; private set; }
 
+    // True when launched with --autostarted, i.e. by the plugin's SessionStart hook rather than by
+    // the user. The tray context only arms the "auto-close after last session" behaviour in this
+    // case, so a manually-opened window never closes itself out from under the user.
+    public static bool AutoStarted { get; private set; }
+
     // Per-user-session name: only one tray runs per desktop login, which is what we want.
     private const string SingleInstanceMutexName = @"Local\ClaudeWatch_SingleInstance";
 
@@ -28,6 +33,8 @@ internal static class Program
             Environment.Exit(0);
             return;
         }
+
+        AutoStarted = args.Any(a => string.Equals(a, "--autostarted", StringComparison.OrdinalIgnoreCase));
 
         VelopackApp
             .Build()

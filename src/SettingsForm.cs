@@ -63,6 +63,12 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _lockNotifyToggle = null!;
     private Label        _lockNotifyLabel  = null!;
 
+    // Automation section. Two independent toggles persisted straight to settings: the SessionStart
+    // hook reads auto-start from settings.json, and the owning context reads auto-close live, so
+    // neither needs an event back to the owner.
+    private ToggleSwitch _autoStartToggle = null!;
+    private ToggleSwitch _autoCloseToggle = null!;
+
     private UsageInfo _usage;
 
     /// <summary>Raised when the user toggles "Show usage limits" (true = enabled).</summary>
@@ -136,6 +142,7 @@ internal sealed class SettingsForm : Form
         AddPage("plugin", "Plugin Control",  BuildPluginPage);
         AddPage("usage",  "Usage Limits",    BuildUsagePage);
         AddPage("notify", "Notifications",   BuildNotificationsPage);
+        AddPage("auto",   "Automation",      BuildAutomationPage);
         AddPage("about",  "About",           BuildAboutPage);
 
         // Add the Fill host first (so it sits behind) and the Left rail second, so the rail claims
@@ -808,6 +815,40 @@ internal sealed class SettingsForm : Form
         _topicQrForm.CenterOn(Screen.FromControl(this));
         _topicQrForm.Show();
         _topicQrForm.Activate();
+    }
+
+    // ── Automation ────────────────────────────────────────────────────────────────
+    private void BuildAutomationPage(FlowLayoutPanel page)
+    {
+        _autoStartToggle = MakeToggle();
+        _autoStartToggle.Checked = _settings.AutoStartOnFirstSession;
+        _autoStartToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.AutoStartOnFirstSession = _autoStartToggle.Checked;
+            _settings.Save();
+        };
+        page.Controls.Add(TitleRow("Start automatically", _autoStartToggle));
+
+        page.Controls.Add(BodyText(
+            "Launch Claude Watch in the background when a Claude Code session opens and it isn't " +
+            "already running. Requires the installed app — the plugin starts it via the " +
+            "\"claude-watch\" command on your PATH, so sessions run from a dev build (dotnet run) " +
+            "won't trigger it."));
+
+        page.Controls.Add(Separator());
+
+        _autoCloseToggle = MakeToggle();
+        _autoCloseToggle.Checked = _settings.AutoCloseAfterLastSession;
+        _autoCloseToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.AutoCloseAfterLastSession = _autoCloseToggle.Checked;
+            _settings.Save();
+        };
+        page.Controls.Add(TitleRow("Close automatically", _autoCloseToggle));
+
+        page.Controls.Add(BodyText(
+            "Exit Claude Watch a short while after the last Claude Code session ends — but only when " +
+            "it was started automatically by the option above. A window you opened yourself stays open."));
     }
 
     // ── About ─────────────────────────────────────────────────────────────────────

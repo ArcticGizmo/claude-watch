@@ -42,6 +42,14 @@ internal sealed class AppSettings
     // is actually connected via /remote-control. Gated by ExternalNotificationsEnabled.
     public bool ExternalNotificationsIncludeRemoteLink { get; set; }
 
+    // Automation. AutoStart: the plugin's SessionStart hook reads this value (the tray usually
+    // isn't running when a session opens) and launches the installed claude-watch when on. AutoClose:
+    // the running tray exits a short grace period after the last session ends — but only when it was
+    // itself auto-started, so a manually-opened window never vanishes under the user. Both off by
+    // default. See the plugin's invoke.ps1 ("start" action) and [[OverlayApplicationContext]].
+    public bool AutoStartOnFirstSession  { get; set; }
+    public bool AutoCloseAfterLastSession { get; set; }
+
     public static AppSettings Load()
     {
         try

@@ -1,7 +1,7 @@
-# Launcher for the claude-watch plugin hooks. Everything is done here in PowerShell by writing the
-# session sidecar files the running tray app observes (it watches ~/.claude/sessions/) — no exe is
-# ever spawned, so the tray can be launched however you like (including `dotnet run`) without the
-# plugin needing to know where its binary lives.
+# Launcher for the claude-watch plugin hooks. Almost everything is done here in PowerShell by writing
+# the session sidecar files the running tray app observes (it watches ~/.claude/sessions/). The one
+# exception is the `start` action (SessionStart), which may launch the installed tray when the user
+# has opted into auto-start — see below.
 #
 # Sidecars, all keyed by session id:
 #   {sid}.mode    — permission mode (every hook). Tool-call data is never read beyond session_id +
@@ -35,6 +35,31 @@ if ($sid -and $j.permission_mode -and (Test-Path $dir)) {
 
 # Mode-only events (PreToolUse / PostToolUse / Stop) are done.
 if ($action -eq 'mode') { exit 0 }
+
+# SessionStart: if the user opted into auto-start, launch the installed tray when one isn't already
+# running. The tray usually isn't up when a session opens, so the on/off state lives in its
+# settings.json (which we read here) rather than in the running app. Only "startup"/"resume" sources
+# represent a session actually opening; "clear"/"compact" happen mid-session, when the tray is
+# already up. Relies on `claude-watch` being on PATH (the installer registers it) — for a dev build
+# run via `dotnet run` it simply won't resolve and this no-ops.
+if ($action -eq 'start') {
+  $source = $j.source
+  if ($source -and $source -ne 'startup' -and $source -ne 'resume') { exit 0 }
+
+  $settingsPath = Join-Path $env:APPDATA 'ClaudeWatch\settings.json'
+  if (-not (Test-Path $settingsPath)) { exit 0 }
+  try { $cfg = Get-Content -Raw -Path $settingsPath | ConvertFrom-Json } catch { exit 0 }
+  if (-not $cfg.AutoStartOnFirstSession) { exit 0 }
+
+  # Already running on this desktop? The tray's single-instance guard would no-op a second launch
+  # anyway, so skip it — this is also our "no other session has it open yet" check.
+  if (Get-Process claude-watch -ErrorAction SilentlyContinue) { exit 0 }
+
+  # --autostarted tells the tray it was launched by this hook, so it knows it's allowed to auto-close
+  # itself after the last session ends (a manually-opened tray never self-closes).
+  Start-Process 'claude-watch' -ArgumentList '--autostarted' -ErrorAction SilentlyContinue
+  exit 0
+}
 
 # SessionEnd: remove this session's sidecars.
 if ($action -eq 'cleanup') {
