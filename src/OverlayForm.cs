@@ -24,6 +24,13 @@ internal sealed class OverlayForm : Form
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
     private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
 
+    // Default vertical gap below the top of the working area for the floating panel. Sized to
+    // clear most applications' window-control (close/minimize) buttons.
+    private const int FloatTopGap = 32;
+    // Dense mode's first-time default sits further down still (4× the base gap) so the slim
+    // right-edge strip doesn't overlay application close icons.
+    private const int DenseTopGapDefault = 64;
+
     // Dense mode: a narrow strip hugging the right screen edge that expands on hover.
     private const int DenseClosedWidth = 44;
     private const int DenseTopPad      = 8;
@@ -142,7 +149,7 @@ internal sealed class OverlayForm : Form
         StartPosition    = FormStartPosition.Manual;
 
         var screen = Screen.PrimaryScreen!.WorkingArea;
-        Location   = new Point(screen.Right - FormWidth - 16, screen.Top + 16);
+        Location   = new Point(screen.Right - FormWidth - 16, screen.Top + FloatTopGap);
         ClientSize = new Size(FormWidth, HeaderHeight);
 
         _flashTimer = new System.Windows.Forms.Timer { Interval = 500 };
@@ -438,7 +445,7 @@ internal sealed class OverlayForm : Form
     {
         if (_dense) return;
         _floatingLoc = Location;                       // remember where floating lives
-        if (!_denseYInit) { _denseY = Location.Y; _denseYInit = true; }
+        if (!_denseYInit) { _denseY = DenseScreen().WorkingArea.Top + DenseTopGapDefault; _denseYInit = true; }
         _dense = true;
         _denseOpen = false;
         _hoveredRow = -1;
