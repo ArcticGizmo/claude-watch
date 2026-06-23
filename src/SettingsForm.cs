@@ -1,6 +1,7 @@
 namespace ClaudeWatch;
 
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 /// <summary>
 /// First-class settings window opened by left-clicking the tray icon. A dark-themed window split
@@ -159,6 +160,7 @@ internal sealed class SettingsForm : Form
         AddPage("auto",         "Automation",      BuildAutomationPage);
         AddPage("quicklinks",   "Quick Links",      BuildQuickLinksPage);
         AddPage("about",        "About",           BuildAboutPage);
+        AddPage("changelog",    "Changelog",       BuildChangelogPage);
 
         // Add the Fill host first (so it sits behind) and the Left rail second, so the rail claims
         // its edge and the host fills the remainder.
@@ -947,6 +949,53 @@ internal sealed class SettingsForm : Form
         page.Controls.Add(row);
     }
 
+    // ── Changelog ────────────────────────────────────────────────────────────────
+    // Renders the embedded CHANGELOG.md into the page using the same factory controls as every other
+    // settings page. Handles the subset of markdown that actually appears in that file: H1/H2/H3
+    // headings, bullet lists, blockquotes, thematic breaks, and inline emphasis/links.
+    private void BuildChangelogPage(FlowLayoutPanel page)
+    {
+        string? markdown = LoadEmbeddedText("ClaudeWatch.CHANGELOG.md");
+        if (markdown is null)
+        {
+            page.Controls.Add(BodyText("Changelog not available."));
+            return;
+        }
+
+        foreach (var rawLine in markdown.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+
+            if (line.StartsWith("## "))
+                page.Controls.Add(SectionTitle(StripInlineMarkdown(line[3..])));
+            else if (line.StartsWith("### "))
+                page.Controls.Add(ChangelogSubHeading(StripInlineMarkdown(line[4..])));
+            else if (line.StartsWith("# "))
+                { /* top-level title — the nav label already says "Changelog" */ }
+            else if (line.StartsWith("- ") || line.StartsWith("* "))
+                page.Controls.Add(BulletText(StripInlineMarkdown(line[2..])));
+            else if (line == "---")
+                page.Controls.Add(Separator());
+            else if (line.StartsWith("> "))
+                page.Controls.Add(BlockQuote(StripInlineMarkdown(line[2..])));
+            else if (line.Trim().Length > 0)
+                page.Controls.Add(BodyText(StripInlineMarkdown(line)));
+        }
+    }
+
+    // Strips the inline markdown patterns that appear in CHANGELOG.md: bold, italic, inline code,
+    // and [text](url) links. Bare [brackets] (version tags) are intentionally left alone.
+    private static string StripInlineMarkdown(string text)
+    {
+        text = Regex.Replace(text, @"\*\*(.*?)\*\*", "$1");            // **bold**
+        text = Regex.Replace(text, @"__(.*?)__",     "$1");            // __bold__
+        text = Regex.Replace(text, @"\*(.*?)\*",     "$1");            // *italic*
+        text = Regex.Replace(text, @"_(.*?)_",       "$1");            // _italic_
+        text = Regex.Replace(text, @"`([^`]+)`",     "$1");            // `inline code`
+        text = Regex.Replace(text, @"\[([^\]]+)\]\([^)]+\)", "$1");   // [text](url)
+        return text;
+    }
+
     // ── Public updates from the owner ────────────────────────────────────────────
     /// <summary>Pushes a fresh usage reading in (e.g. after the context's periodic poll).</summary>
     public void UpdateUsage(UsageInfo usage)
@@ -1106,6 +1155,59 @@ internal sealed class SettingsForm : Form
         b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
         b.FlatAppearance.MouseDownBackColor = Theme.Border;
         return b;
+    }
+
+    // A bullet-prefixed body paragraph for changelog list items.
+    private Label BulletText(string text)
+    {
+        var l = new Label
+        {
+            Text        = "•  " + text,
+            AutoSize    = true,
+            MaximumSize = new Size(480, 0),
+            ForeColor   = Theme.Muted,
+            Margin      = new Padding(0, 0, 0, 4),
+        };
+        _fluidWrap.Add(l);
+        return l;
+    }
+
+    // A smaller bold heading for H3 changelog sub-sections.
+    private static Label ChangelogSubHeading(string text) => new()
+    {
+        Text      = text,
+        AutoSize  = true,
+        ForeColor = Theme.Fg,
+        Font      = new Font("Segoe UI", 9.5f, FontStyle.Bold, GraphicsUnit.Point),
+        Margin    = new Padding(0, 6, 0, 4),
+    };
+
+    // An indented italic label for blockquote text (used for the editorial asides in the changelog).
+    private Label BlockQuote(string text)
+    {
+        var l = new Label
+        {
+            Text        = text,
+            AutoSize    = true,
+            MaximumSize = new Size(480, 0),
+            ForeColor   = Theme.Muted,
+            Font        = new Font("Segoe UI", 9f, FontStyle.Italic, GraphicsUnit.Point),
+            Margin      = new Padding(12, 0, 0, 6),
+        };
+        _fluidWrap.Add(l);
+        return l;
+    }
+
+    private static string? LoadEmbeddedText(string resourceName)
+    {
+        try
+        {
+            using var stream = typeof(SettingsForm).Assembly.GetManifestResourceStream(resourceName);
+            if (stream is null) return null;
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd();
+        }
+        catch { return null; }
     }
 
     private static void OpenUrl(string url)
