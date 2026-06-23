@@ -55,7 +55,7 @@ internal sealed class SessionChildReader
     /// Returns the children currently running under the given session, or empty lists if the
     /// transcript can't be located or read. Only direct children of the session are reported.
     /// </summary>
-    public SessionChildren GetRunning(string sessionId, string cwd)
+    public SessionChildren GetRunning(string sessionId, string cwd, bool sessionBusy = true)
     {
         if (string.IsNullOrEmpty(sessionId))
             return SessionChildren.Empty;
@@ -80,7 +80,7 @@ internal sealed class SessionChildReader
                 _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
             }
 
-            result = ApplyFirstSeenCleanup(result, TasksDir(path));
+            result = ApplyFirstSeenCleanup(result, TasksDir(path), sessionBusy);
             return result;
         }
         catch
@@ -298,8 +298,11 @@ internal sealed class SessionChildReader
         return new SessionChildren(subAgents, shells);
     }
 
-    // Maintains _shellFirstSeen and retires shells whose output file never appeared after 30 min.
-    private SessionChildren ApplyFirstSeenCleanup(SessionChildren result, string? tasksDir)
+    // Maintains _shellFirstSeen and retires orphaned shells.
+    // When the session is idle (sessionBusy=false), a much shorter stale window is used for
+    // output files: shells stopped by a manual session termination clean up within ~2 minutes
+    // rather than waiting for the 30-minute fallback in Parse().
+    private SessionChildren ApplyFirstSeenCleanup(SessionChildren result, string? tasksDir, bool sessionBusy)
     {
         var now = DateTime.UtcNow;
 
@@ -314,13 +317,38 @@ internal sealed class SessionChildReader
         if (tasksDir == null)
             return result;
 
-        // Retire shells with no output file that have been "running" for > 30 minutes.
-        // Shells that do have an output file are handled by the stale-file check in Parse().
+        // When idle, retire shells whose output file hasn't been written in 2 minutes.
+        // This handles the common case of a manually-terminated session: the shell is killed
+        // with the session, no task-notification is written, but the output file goes stale fast.
+        // When busy, trust the 30-minute stale check in Parse() so silent long-running shells
+        // (large builds, ML training runs, etc.) aren't prematurely retired.
+        var idleStaleWindow = sessionBusy ? (TimeSpan?)null : TimeSpan.FromMinutes(2);
+
         var filtered = result.Shells.Where(shell =>
         {
-            if (!_shellFirstSeen.TryGetValue(shell.ShellId, out var firstSeen)) return true;
-            if ((now - firstSeen).TotalMinutes < 30) return true;
-            return File.Exists(Path.Combine(tasksDir, shell.ShellId + ".output"));
+            if (tasksDir == null) return true;
+            var outputFile = Path.Combine(tasksDir, shell.ShellId + ".output");
+
+            // No-output-file fallback: retire after 30 min of first-seen regardless.
+            if (!File.Exists(outputFile))
+            {
+                if (!_shellFirstSeen.TryGetValue(shell.ShellId, out var firstSeen)) return true;
+                return (now - firstSeen).TotalMinutes < 30;
+            }
+
+            // Idle-session fast stale check: retire if output file hasn't been touched recently.
+            if (idleStaleWindow.HasValue)
+            {
+                try
+                {
+                    var fi = new FileInfo(outputFile);
+                    if ((now - fi.LastWriteTimeUtc) > idleStaleWindow.Value)
+                        return false;
+                }
+                catch { }
+            }
+
+            return true;
         }).ToList();
 
         return filtered.Count == result.Shells.Count

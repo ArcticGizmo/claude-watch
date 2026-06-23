@@ -243,7 +243,7 @@ internal sealed class SessionMonitor : IDisposable
             // have no session file of their own; surface them from the transcript. Sub-agents block
             // the parent loop (so they roll activity up, below); background shells do not, so they
             // are attached for display only and never change the parent's status.
-            var children = _children.GetRunning(sessionId, cwd);
+            var children = _children.GetRunning(sessionId, cwd, sessionBusy: rawStatus == "busy");
             var subAgents = children.SubAgents;
             var shells = children.Shells;
             bool hasRunningSubs = subAgents.Count > 0;
