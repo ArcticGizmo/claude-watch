@@ -81,14 +81,22 @@ internal sealed class SessionChildReader
         }
     }
 
-    private string? ResolveTranscript(string sessionId, string cwd)
+    private string? ResolveTranscript(string sessionId, string cwd) =>
+        ResolveTranscript(sessionId, cwd, _projectsDir);
+
+    public static string? ResolveTranscript(string sessionId, string cwd, string? projectsDir = null)
     {
+        projectsDir ??= Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "projects"
+        );
+
         // Claude Code encodes the cwd into the project dir name by replacing every
         // non-alphanumeric character with '-' (e.g. C:\a\b.c -> C--a-b-c). Try that first.
         if (!string.IsNullOrEmpty(cwd))
         {
             var encoded = Regex.Replace(cwd, "[^A-Za-z0-9]", "-");
-            var direct = Path.Combine(_projectsDir, encoded, sessionId + ".jsonl");
+            var direct = Path.Combine(projectsDir, encoded, sessionId + ".jsonl");
             if (File.Exists(direct))
                 return direct;
         }
@@ -97,7 +105,7 @@ internal sealed class SessionChildReader
         // covers any cwd-encoding edge case the rule above doesn't capture.
         try
         {
-            foreach (var dir in Directory.EnumerateDirectories(_projectsDir))
+            foreach (var dir in Directory.EnumerateDirectories(projectsDir))
             {
                 var candidate = Path.Combine(dir, sessionId + ".jsonl");
                 if (File.Exists(candidate))
