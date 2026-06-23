@@ -42,6 +42,9 @@ internal sealed class SessionChildReader
     private static readonly Regex TerminalStatusRegex = new(@"<status>(completed|failed|killed)</status>", RegexOptions.Compiled);
     // The shell id Claude Code reports back when a command is launched in the background.
     private static readonly Regex BackgroundIdRegex = new(@"running in background with ID:\s*([A-Za-z0-9]+)", RegexOptions.Compiled);
+    // The result text written when a background shell is stopped/killed (no task-notification fires
+    // for a kill, so this — and the kill tool_use itself — are how we learn a shell ended early).
+    private static readonly Regex StoppedTaskRegex = new(@"stopped task:\s*([A-Za-z0-9]+)", RegexOptions.Compiled);
 
     private readonly record struct CacheEntry(long Length, DateTime WriteUtc, SessionChildren Result);
 
@@ -132,7 +135,10 @@ internal sealed class SessionChildReader
                 || line.Contains("\"Task\"")
                 || line.Contains("tool_result")
                 || line.Contains("run_in_background")
-                || line.Contains("task-notification");
+                || line.Contains("task-notification")
+                || line.Contains("TaskStop")
+                || line.Contains("KillShell")
+                || line.Contains("KillBash");
             if (!maybeChild)
                 continue;
 
@@ -150,6 +156,17 @@ internal sealed class SessionChildReader
                 var idMatch = TaskIdRegex.Match(line);
                 if (idMatch.Success && TerminalStatusRegex.IsMatch(line))
                     finishedShells.Add(idMatch.Groups[1].Value);
+            }
+
+            // Background-shell kill: stopping a shell (via the TaskStop/KillShell tool or the
+            // interactive background-task UI) writes a "...stopped task: <id>" result but NO
+            // task-notification, so detect that text directly. Skip assistant lines so the model
+            // narrating a kill can't retire a live shell.
+            if (recordType != "assistant" && line.Contains("stopped task"))
+            {
+                var m = StoppedTaskRegex.Match(line);
+                if (m.Success)
+                    finishedShells.Add(m.Groups[1].Value);
             }
 
             if (node?["message"]?["content"] is not JsonArray content)
@@ -181,6 +198,17 @@ internal sealed class SessionChildReader
                     {
                         var cmd = SingleLine(input["command"]?.GetValue<string>() ?? "");
                         shellUses[id] = (cmd, name);
+                    }
+                    // A kill tool names the shell by id; the field has drifted over versions
+                    // (task_id, older shell_id/bash_id), so accept any of them.
+                    else if (name is "TaskStop" or "KillShell" or "KillBash")
+                    {
+                        var killId =
+                            input?["task_id"]?.GetValue<string>()
+                            ?? input?["shell_id"]?.GetValue<string>()
+                            ?? input?["bash_id"]?.GetValue<string>();
+                        if (killId != null)
+                            finishedShells.Add(killId);
                     }
                 }
                 else if (type == "tool_result")
@@ -215,6 +243,7 @@ internal sealed class SessionChildReader
         }
 
         var shells = new List<BackgroundShell>();
+        var seenShellIds = new HashSet<string>();
         foreach (var (useId, info) in shellUses)
         {
             // A shell we can't resolve an id for hasn't reported back yet (no spawn result); skip
@@ -222,6 +251,10 @@ internal sealed class SessionChildReader
             if (!shellIdByUseId.TryGetValue(useId, out var shellId))
                 continue;
             if (finishedShells.Contains(shellId))
+                continue;
+            // Dedupe by shell id: a transcript can carry the same shell under more than one tool_use
+            // id (e.g. context replayed when a sub-agent runs), and the shell id is its true identity.
+            if (!seenShellIds.Add(shellId))
                 continue;
             var label = string.IsNullOrWhiteSpace(info.Command) ? "shell" : info.Command;
             shells.Add(new BackgroundShell(shellId, label, info.Tool));

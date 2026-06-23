@@ -29,6 +29,8 @@ anything else:
 3. Launch a third background shell that runs for about 4 minutes:
    `for i in $(seq 1 120); do echo "longest $i"; sleep 2; done` with `run_in_background: true`.
 
+Also spawn one Explore sub-agent that searches this repo for "TODO" comments. It will run as a sub-agent (a separate row) while the background shells run.
+
 After launching all three, tell me their shell IDs and then just wait — do not check their output or
 kill them. Let me watch them in the monitoring tool. Each should disappear from the tool as it
 finishes (short first, then long, then longest).
