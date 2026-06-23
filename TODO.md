@@ -5,4 +5,4 @@
 - embedd changelog into application
 - add an "expected rate" indicator to session limits to see if you are on track
 - make claude code always open expanded
-
+- add a "focus gitkracken" option so I can jump back and forward more easily
