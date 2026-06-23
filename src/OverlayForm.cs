@@ -1319,6 +1319,12 @@ internal sealed class OverlayForm : Form
             items.Add(("View history", () => HistoryRequested?.Invoke(historySession.SessionId)));
         }
 
+        if (row >= 0)
+        {
+            var idSession = _rows[row].Session;
+            items.Add(("Copy session ID", () => Clipboard.SetText(idSession.SessionId)));
+        }
+
         if (row >= 0 && _rows[row].Session is { RemoteControlled: true } rc)
             items.Add(("Show QR code", () => ShowQrCode(rc)));
 
