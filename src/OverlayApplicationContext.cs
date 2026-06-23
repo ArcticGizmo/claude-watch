@@ -292,6 +292,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         if (!Program.AutoStarted || !_settings.AutoCloseAfterLastSession)
         {
             _autoCloseTimer.Stop();
+            _overlay.CancelAutoCloseCountdown();
             return;
         }
 
@@ -299,6 +300,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         {
             _seenSession = true;
             _autoCloseTimer.Stop();
+            _overlay.CancelAutoCloseCountdown();
             return;
         }
 
@@ -316,6 +318,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             return;
 
         _autoCloseTimer.Start();
+        // Surface the grace countdown on the overlay as a quiet depleting bar.
+        _overlay.StartAutoCloseCountdown(AutoCloseGraceMs);
     }
 
     // Marshals a re-scan onto the UI thread. SessionMonitor raises ChangeDetected from

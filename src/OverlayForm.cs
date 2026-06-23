@@ -117,6 +117,15 @@ internal sealed class OverlayForm : Form
     private readonly System.Windows.Forms.Timer _usageHoverTimer;
     private readonly System.Windows.Forms.Timer _denseCloseTimer;
 
+    // Auto-close countdown: while the owning context's "auto-close after last session" grace timer is
+    // armed, a thin grey bar across the top of the panel depletes from full to empty, quietly hinting
+    // when the window will close itself. Driven entirely from the context via Start/CancelAutoClose-
+    // Countdown; _autoCloseEnds is when the bar (and the real close) is due.
+    private readonly System.Windows.Forms.Timer _autoCloseBarTimer;
+    private bool _autoCloseActive;
+    private DateTime _autoCloseEnds;
+    private int _autoCloseDurationMs;
+
     // The claude-watch icon, shown atop the dense strip purely for flair. Null if unavailable.
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
 
@@ -191,6 +200,16 @@ internal sealed class OverlayForm : Form
                 CloseDensePopup();
             else
                 _denseCloseTimer.Stop();
+        };
+
+        // Repaints the auto-close countdown bar while it's active. Stops itself once the deadline
+        // passes (the context's grace timer fires Exit at that point and tears the window down).
+        _autoCloseBarTimer = new System.Windows.Forms.Timer { Interval = 50 };
+        _autoCloseBarTimer.Tick += (_, _) =>
+        {
+            if (!_autoCloseActive || DateTime.Now >= _autoCloseEnds)
+                _autoCloseBarTimer.Stop();
+            Invalidate();
         };
 
         // If a monitor is added or removed, re-evaluate the dense docking; DenseScreen() resets to
@@ -310,6 +329,27 @@ internal sealed class OverlayForm : Form
         _flashTimer.Start();
         _flashStopTimer.Stop();
         _flashStopTimer.Start();
+        Invalidate();
+    }
+
+    // Begin the auto-close countdown indicator: a depleting bar due durationMs from now. Idempotent
+    // restart — the context only calls this on a genuine arm, so it won't reset mid-countdown.
+    public void StartAutoCloseCountdown(int durationMs)
+    {
+        _autoCloseActive     = true;
+        _autoCloseDurationMs = durationMs;
+        _autoCloseEnds       = DateTime.Now.AddMilliseconds(durationMs);
+        if (!_autoCloseBarTimer.Enabled)
+            _autoCloseBarTimer.Start();
+        Invalidate();
+    }
+
+    // Hide the countdown bar (a session reappeared, or auto-close conditions no longer hold).
+    public void CancelAutoCloseCountdown()
+    {
+        if (!_autoCloseActive && !_autoCloseBarTimer.Enabled) return;
+        _autoCloseActive = false;
+        _autoCloseBarTimer.Stop();
         Invalidate();
     }
 
@@ -529,6 +569,9 @@ internal sealed class OverlayForm : Form
 
         DrawHeader(g);
 
+        if (_autoCloseActive)
+            DrawAutoCloseBar(g);
+
         if (ShowFullPanel)
         {
             if (_usageEnabled)
@@ -536,6 +579,27 @@ internal sealed class OverlayForm : Form
             for (int i = 0; i < _rows.Count; i++)
                 DrawRow(g, i);
         }
+    }
+
+    // A thin bar hugging the top edge that shrinks from full to empty over the auto-close grace
+    // period, quietly hinting when the window will close itself. Deliberately drawn in the muted idle
+    // grey so it stays unobtrusive. Harmless when the deadline has passed (renders empty) until the
+    // window is torn down.
+    private void DrawAutoCloseBar(Graphics g)
+    {
+        double remaining = (_autoCloseEnds - DateTime.Now).TotalMilliseconds;
+        double frac = _autoCloseDurationMs > 0 ? Math.Clamp(remaining / _autoCloseDurationMs, 0, 1) : 0;
+
+        const int TrackH = 3;
+        int left  = HorizPad;
+        int right = ClientSize.Width - HorizPad;
+        int w     = right - left;
+        int y     = 4;
+
+        int fillW = (int)Math.Round(w * frac);
+        if (fillW > 0)
+            using (var fill = new SolidBrush(IdleColor))
+                FillRoundedBar(g, fill, left, y, fillW, TrackH);
     }
 
     private void DrawHeader(Graphics g)
@@ -1354,6 +1418,7 @@ internal sealed class OverlayForm : Form
             _tickTimer.Dispose();
             _usageHoverTimer.Dispose();
             _denseCloseTimer.Dispose();
+            _autoCloseBarTimer.Dispose();
             _usageTooltip.Dispose();
             _popover?.Dispose();
             _qrForm?.Dispose();
