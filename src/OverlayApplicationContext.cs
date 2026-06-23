@@ -53,6 +53,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // can focus the right terminal.
     private string? _lastNotifiedPid;
 
+    // Latched while a check/download/apply is in flight so a second click (the menu and the settings
+    // window both reach CheckForUpdates) can't kick off a parallel run and race two installs.
+    private bool _updateInProgress;
+
     public OverlayApplicationContext()
     {
         _settings = AppSettings.Load();
@@ -505,6 +509,11 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private async void CheckForUpdates()
     {
+        // A run is already in flight — the window has likely already closed, so just ignore the click.
+        if (_updateInProgress)
+            return;
+        _updateInProgress = true;
+
         // Update balloons aren't tied to a session; don't let a click focus a stale terminal.
         _lastNotifiedPid = null;
         try
@@ -525,6 +534,15 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
             _notifyIcon.ShowBalloonTip(5000);
 
+            // Close the open windows up front: the closing window is the visible signal that the
+            // update is under way, and it stops the button being clicked again mid-download. The
+            // overlay stays up so the message loop survives the awaits below — ApplyUpdatesAndRestart
+            // tears everything down when it relaunches.
+            if (_settingsForm is { IsDisposed: false })
+                _settingsForm.Close();
+            if (_historyForm is { IsDisposed: false })
+                _historyForm.Close();
+
             await mgr.DownloadUpdatesAsync(update);
             mgr.ApplyUpdatesAndRestart(update);
         }
@@ -534,6 +552,12 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _notifyIcon.BalloonTipText  = ex.Message;
             _notifyIcon.BalloonTipIcon  = ToolTipIcon.Error;
             _notifyIcon.ShowBalloonTip(6000);
+        }
+        finally
+        {
+            // ApplyUpdatesAndRestart exits the process, so this only runs on the "up to date" or
+            // failure paths — both of which should allow another check later.
+            _updateInProgress = false;
         }
     }
 
