@@ -1322,6 +1322,7 @@ internal sealed class OverlayForm : Form
         {
             var historySession = _rows[row].Session;
             items.Add(("View history", () => HistoryRequested?.Invoke(historySession.SessionId)));
+            items.Add(("Copy session ID", () => Clipboard.SetText(historySession.SessionId)));
         }
 
         if (row >= 0 && _rows[row].Session is { RemoteControlled: true } rc)
