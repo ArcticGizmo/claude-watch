@@ -137,6 +137,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.SetUsageEnabled(_settings.ShowUsage);
         _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
         _overlay.SetGitKrakenEnabled(_settings.ShowGitKraken);
+        _overlay.SetSlackEnabled(_settings.ShowSlack);
         _monitor.Scan();
 
         if (_settings.ShowUsage)
@@ -193,6 +194,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
         _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
         _settingsForm.GitKrakenEnabledChanged += SetGitKrakenEnabled;
+        _settingsForm.SlackEnabledChanged     += SetSlackEnabled;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -436,6 +438,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settings.ShowGitKraken = enabled;
         _settings.Save();
         _overlay.SetGitKrakenEnabled(enabled);
+    }
+
+    private void SetSlackEnabled(bool enabled)
+    {
+        _settings.ShowSlack = enabled;
+        _settings.Save();
+        _overlay.SetSlackEnabled(enabled);
     }
 
     // Pushes an external notification for a session, but only when the feature is on and that session

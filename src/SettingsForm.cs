@@ -71,6 +71,7 @@ internal sealed class SettingsForm : Form
 
     // Integrations section.
     private ToggleSwitch _gitKrakenToggle = null!;
+    private ToggleSwitch _slackToggle     = null!;
 
     private UsageInfo _usage;
 
@@ -91,6 +92,9 @@ internal sealed class SettingsForm : Form
 
     /// <summary>Raised when the user toggles "Show GitKraken button" (true = enabled).</summary>
     public event Action<bool>? GitKrakenEnabledChanged;
+
+    /// <summary>Raised when the user toggles "Show Slack button" (true = enabled).</summary>
+    public event Action<bool>? SlackEnabledChanged;
 
     public SettingsForm(AppSettings settings, UsageMonitor usageMonitor, UsageInfo currentUsage)
     {
@@ -861,15 +865,25 @@ internal sealed class SettingsForm : Form
     // ── Integrations ──────────────────────────────────────────────────────────────
     private void BuildIntegrationsPage(FlowLayoutPanel page)
     {
+        page.Controls.Add(BodyText(
+            "Show app icons below the usage bars in the overlay. " +
+            "Click an icon to open that app or bring it to focus if it is already running."));
+
+        page.Controls.Add(Separator());
+
         _gitKrakenToggle = MakeToggle();
         _gitKrakenToggle.Checked = _settings.ShowGitKraken;
         _gitKrakenToggle.CheckedChanged += (_, _) =>
             GitKrakenEnabledChanged?.Invoke(_gitKrakenToggle.Checked);
         page.Controls.Add(TitleRow("GitKraken", _gitKrakenToggle));
 
-        page.Controls.Add(BodyText(
-            "Show a GitKraken icon below the usage bars in the overlay. " +
-            "Click it to open GitKraken or bring it to focus if it is already running."));
+        page.Controls.Add(Separator());
+
+        _slackToggle = MakeToggle();
+        _slackToggle.Checked = _settings.ShowSlack;
+        _slackToggle.CheckedChanged += (_, _) =>
+            SlackEnabledChanged?.Invoke(_slackToggle.Checked);
+        page.Controls.Add(TitleRow("Slack", _slackToggle));
     }
 
     // ── About ─────────────────────────────────────────────────────────────────────

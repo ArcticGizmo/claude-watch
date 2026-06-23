@@ -50,9 +50,9 @@ internal sealed class AppSettings
     public bool AutoStartOnFirstSession  { get; set; }
     public bool AutoCloseAfterLastSession { get; set; }
 
-    // Integrations. ShowGitKraken: display a clickable GitKraken icon below the usage bars in the
-    // overlay; clicking opens GitKraken or brings focus to it if already running. Off by default.
+    // Integrations. Icons displayed below the usage bars; each opens the app or focuses it.
     public bool ShowGitKraken { get; set; }
+    public bool ShowSlack     { get; set; }
 
     public static AppSettings Load()
     {

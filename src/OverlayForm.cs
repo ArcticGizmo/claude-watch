@@ -23,7 +23,7 @@ internal sealed class OverlayForm : Form
     private const int Corner            = 10;
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
     private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
-    private const int GitKrakenRowHeight= 24;  // height of the GitKraken icon row below the usage bars
+    private const int IntegrationsRowHeight = 24; // height of the integrations icon strip below the usage bars
 
     // Default vertical gap below the top of the working area for the floating panel. Sized to
     // clear most applications' window-control (close/minimize) buttons.
@@ -110,10 +110,14 @@ internal sealed class OverlayForm : Form
     private readonly UsageTooltipForm _usageTooltip = new();
 
     private bool _gitKrakenEnabled;
-    private bool _inGitKrakenRow;
+    private bool _slackEnabled;
+    // -1 = none hovered, 0 = GitKraken, 1 = Slack
+    private int  _hoveredIntegration = -1;
 
-    // Top of the session rows when expanded: header, plus the usage strip and optional GitKraken row.
-    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (_gitKrakenEnabled ? GitKrakenRowHeight : 0);
+    private bool HasIntegrationsRow => _gitKrakenEnabled || _slackEnabled;
+
+    // Top of the session rows when expanded: header, plus the usage strip and optional integrations row.
+    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (HasIntegrationsRow ? IntegrationsRowHeight : 0);
 
     private readonly System.Windows.Forms.Timer _flashTimer;
     private readonly System.Windows.Forms.Timer _flashStopTimer;
@@ -132,8 +136,9 @@ internal sealed class OverlayForm : Form
 
     // The claude-watch icon, shown atop the dense strip purely for flair. Null if unavailable.
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
-    // GitKraken app icon, extracted from the installed executable on startup. Null if not installed.
+    // Integration icons, extracted from each installed executable on startup. Null if not installed.
     private readonly Bitmap? _gitKrakenIcon = LoadGitKrakenIcon(18);
+    private readonly Bitmap? _slackIcon     = LoadSlackIcon(18);
 
     // Is the full session body (usage bars + rows) currently on screen? In floating mode that's
     // the expanded state; in dense mode it's the hover-opened popup.
@@ -292,6 +297,14 @@ internal sealed class OverlayForm : Form
         Invalidate();
     }
 
+    public void SetSlackEnabled(bool enabled)
+    {
+        if (_slackEnabled == enabled) return;
+        _slackEnabled = enabled;
+        RelayoutWindow();
+        Invalidate();
+    }
+
     // Whether external (ntfy) notifications are switched on globally. Controls whether the per-session
     // mail glyph and the right-click enable/disable item appear at all.
     public void SetExternalNotificationsAvailable(bool available)
@@ -410,8 +423,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 h += UsageStripHeight;  // usage bars sit between the header and the rows
-            if (_gitKrakenEnabled)
-                h += GitKrakenRowHeight;
+            if (HasIntegrationsRow)
+                h += IntegrationsRowHeight;
             foreach (var row in _rows)
                 h += HeightOf(row);
             h += 2;
@@ -592,8 +605,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 DrawUsageBars(g);
-            if (_gitKrakenEnabled)
-                DrawGitKrakenRow(g);
+            if (HasIntegrationsRow)
+                DrawIntegrationsRow(g);
             for (int i = 0; i < _rows.Count; i++)
                 DrawRow(g, i);
         }
@@ -928,33 +941,80 @@ internal sealed class OverlayForm : Form
         g.FillPath(brush, path);
     }
 
-    // ── GitKraken row ─────────────────────────────────────────────────────────
-    private void DrawGitKrakenRow(Graphics g)
+    // ── Integrations row ──────────────────────────────────────────────────────
+    // Draws enabled integration icons side-by-side, centred horizontally.
+    // Integration indices: 0 = GitKraken, 1 = Slack.
+    private void DrawIntegrationsRow(Graphics g)
     {
-        int rowTop   = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
-        int centerX  = ClientSize.Width / 2;
-        int centerY  = rowTop + GitKrakenRowHeight / 2;
         const int IconSize = 16;
+        const int IconGap  = 14;
+        const int HitPad   = 4;
 
-        if (_inGitKrakenRow)
-        {
-            using var hover = new SolidBrush(Color.FromArgb(22, 255, 255, 255));
-            g.FillRectangle(hover, 0, rowTop, ClientSize.Width, GitKrakenRowHeight);
-        }
+        int rowTop  = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+        int centerY = rowTop + IntegrationsRowHeight / 2;
 
-        if (_gitKrakenIcon != null)
+        // Build ordered list of enabled icons.
+        var slots = new List<(Bitmap? icon, string fallback, Color fallbackColor, int index)>();
+        if (_gitKrakenEnabled) slots.Add((_gitKrakenIcon, "GK", Color.FromArgb(16, 179, 105), 0));
+        if (_slackEnabled)     slots.Add((_slackIcon,     "Sl", Color.FromArgb(74, 21, 75),    1));
+
+        int totalW = slots.Count * IconSize + (slots.Count - 1) * IconGap;
+        int startX = (ClientSize.Width - totalW) / 2;
+
+        for (int i = 0; i < slots.Count; i++)
         {
-            g.DrawImage(_gitKrakenIcon,
-                centerX - IconSize / 2, centerY - IconSize / 2, IconSize, IconSize);
+            var (icon, fallback, fallbackColor, index) = slots[i];
+            int iconX = startX + i * (IconSize + IconGap);
+            int iconY = centerY - IconSize / 2;
+
+            if (_hoveredIntegration == index)
+            {
+                using var hover = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
+                g.FillRectangle(hover,
+                    iconX - HitPad, iconY - HitPad,
+                    IconSize + HitPad * 2, IconSize + HitPad * 2);
+            }
+
+            if (icon != null)
+            {
+                g.DrawImage(icon, iconX, iconY, IconSize, IconSize);
+            }
+            else
+            {
+                using var font  = new Font("Segoe UI", 7f, FontStyle.Bold, GraphicsUnit.Point);
+                using var brush = new SolidBrush(fallbackColor);
+                var sz = g.MeasureString(fallback, font);
+                g.DrawString(fallback, font, brush,
+                    iconX + (IconSize - sz.Width) / 2, iconY + (IconSize - sz.Height) / 2);
+            }
         }
-        else
+    }
+
+    // Returns the integration index (0=GitKraken, 1=Slack) under point p, or -1 if none.
+    private int HitTestIntegration(Point p)
+    {
+        if (!HasIntegrationsRow) return -1;
+        int rowTop = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+        if (p.Y < rowTop || p.Y >= rowTop + IntegrationsRowHeight) return -1;
+
+        const int IconSize = 16;
+        const int IconGap  = 14;
+        const int HitPad   = 4;
+
+        var slots = new List<int>();
+        if (_gitKrakenEnabled) slots.Add(0);
+        if (_slackEnabled)     slots.Add(1);
+
+        int totalW = slots.Count * IconSize + (slots.Count - 1) * IconGap;
+        int startX = (ClientSize.Width - totalW) / 2;
+
+        for (int i = 0; i < slots.Count; i++)
         {
-            // GitKraken not installed: draw a simple teal "GK" monogram as fallback.
-            using var font  = new Font("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
-            using var brush = new SolidBrush(Color.FromArgb(16, 179, 105));
-            var sz = g.MeasureString("GK", font);
-            g.DrawString("GK", font, brush, centerX - sz.Width / 2, centerY - sz.Height / 2);
+            int iconX = startX + i * (IconSize + IconGap);
+            if (p.X >= iconX - HitPad && p.X < iconX + IconSize + HitPad)
+                return slots[i];
         }
+        return -1;
     }
 
     private static string? TryFindGitKrakenExe()
@@ -978,13 +1038,49 @@ internal sealed class OverlayForm : Form
         return null;
     }
 
-    private static Bitmap? LoadGitKrakenIcon(int size)
+    private static string? TryFindSlackExe()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var standalone = Path.Combine(local, "Programs", "Slack", "slack.exe");
+        if (File.Exists(standalone)) return standalone;
+
+        var squirrelDir = Path.Combine(local, "slack");
+        if (Directory.Exists(squirrelDir))
+        {
+            foreach (var sub in Directory.GetDirectories(squirrelDir, "app-*")
+                                         .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                var exe = Path.Combine(sub, "slack.exe");
+                if (File.Exists(exe)) return exe;
+            }
+        }
+
+        return null;
+    }
+
+    private static Bitmap? LoadAndResizeEmbedded(string resourceName, int size)
     {
         try
         {
-            var exe = TryFindGitKrakenExe();
-            if (exe == null) return null;
-            using var icon = Icon.ExtractAssociatedIcon(exe);
+            using var stream = typeof(OverlayForm).Assembly.GetManifestResourceStream(resourceName);
+            if (stream == null) return null;
+            using var src = new Bitmap(stream);
+            var result = new Bitmap(size, size);
+            using var ig = Graphics.FromImage(result);
+            ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            ig.DrawImage(src, 0, 0, size, size);
+            return result;
+        }
+        catch { return null; }
+    }
+
+    private static Bitmap? LoadAppIcon(string? exePath, int size)
+    {
+        if (exePath == null) return null;
+        try
+        {
+            using var icon = Icon.ExtractAssociatedIcon(exePath);
             if (icon == null) return null;
             using var bmp  = icon.ToBitmap();
             var result = new Bitmap(size, size);
@@ -996,11 +1092,20 @@ internal sealed class OverlayForm : Form
         catch { return null; }
     }
 
-    private static void LaunchOrFocusGitKraken()
+    // Embedded PNGs take priority; fall back to extracting from the installed exe.
+    private static Bitmap? LoadGitKrakenIcon(int size) =>
+        LoadAndResizeEmbedded("ClaudeWatch.gitkraken.png", size)
+        ?? LoadAppIcon(TryFindGitKrakenExe(), size);
+
+    private static Bitmap? LoadSlackIcon(int size) =>
+        LoadAndResizeEmbedded("ClaudeWatch.slack.png", size)
+        ?? LoadAppIcon(TryFindSlackExe(), size);
+
+    private static void LaunchOrFocus(string processName, string? exePath)
     {
         try
         {
-            foreach (var p in System.Diagnostics.Process.GetProcessesByName("gitkraken"))
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName(processName))
             {
                 if (p.MainWindowHandle != IntPtr.Zero)
                 {
@@ -1008,14 +1113,15 @@ internal sealed class OverlayForm : Form
                     return;
                 }
             }
-
-            var exe = TryFindGitKrakenExe();
-            if (exe != null)
+            if (exePath != null)
                 System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
+                    new System.Diagnostics.ProcessStartInfo(exePath) { UseShellExecute = true });
         }
         catch { }
     }
+
+    private static void LaunchOrFocusGitKraken() => LaunchOrFocus("gitkraken", TryFindGitKrakenExe());
+    private static void LaunchOrFocusSlack()     => LaunchOrFocus("slack",     TryFindSlackExe());
 
     private void DrawRow(Graphics g, int rowIdx)
     {
@@ -1291,12 +1397,12 @@ internal sealed class OverlayForm : Form
                 }
             }
 
-            // GitKraken icon row hover.
-            bool inGkRow = ShowFullPanel && _gitKrakenEnabled && e.Y >= usageStripEnd && e.Y < usageStripEnd + GitKrakenRowHeight;
-            if (inGkRow != _inGitKrakenRow)
+            // Integration icons row hover (per-icon hit test).
+            int hovered = ShowFullPanel ? HitTestIntegration(e.Location) : -1;
+            if (hovered != _hoveredIntegration)
             {
-                _inGitKrakenRow = inGkRow;
-                Cursor = inGkRow ? Cursors.Hand : Cursors.Default;
+                _hoveredIntegration = hovered;
+                Cursor = hovered >= 0 ? Cursors.Hand : Cursors.Default;
                 Invalidate();
             }
         }
@@ -1345,9 +1451,10 @@ internal sealed class OverlayForm : Form
                     if (int.TryParse(pid, out int pidInt))
                         NativeMethods.FocusTerminalForProcess(pidInt);
                 }
-                else if (ShowFullPanel && _gitKrakenEnabled && e.Y >= HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) && e.Y < RowsTop)
+                else if (HitTestIntegration(e.Location) is var integ && integ >= 0)
                 {
-                    LaunchOrFocusGitKraken();
+                    if (integ == 0) LaunchOrFocusGitKraken();
+                    else if (integ == 1) LaunchOrFocusSlack();
                 }
                 else if (!_dense && e.Y < HeaderHeight && _sessions.Count > 0)
                 {
@@ -1380,7 +1487,7 @@ internal sealed class OverlayForm : Form
         _inUsageStrip = false;
         _usageHoverTimer.Stop();
         HideUsageTooltip();
-        if (_inGitKrakenRow) { _inGitKrakenRow = false; Cursor = Cursors.Default; }
+        if (_hoveredIntegration >= 0) { _hoveredIntegration = -1; Cursor = Cursors.Default; }
 
         // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
         // where the cursor legitimately roams to another monitor's drop lane.
