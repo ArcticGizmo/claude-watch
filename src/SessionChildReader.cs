@@ -242,6 +242,9 @@ internal sealed class SessionChildReader
             subAgents.Add(new SubAgent(id, label, info.Type));
         }
 
+        var tasksDir = TasksDir(path);
+        var staleCutoff = DateTime.UtcNow - TimeSpan.FromMinutes(5);
+
         var shells = new List<BackgroundShell>();
         var seenShellIds = new HashSet<string>();
         foreach (var (useId, info) in shellUses)
@@ -256,11 +259,38 @@ internal sealed class SessionChildReader
             // id (e.g. context replayed when a sub-agent runs), and the shell id is its true identity.
             if (!seenShellIds.Add(shellId))
                 continue;
+            // Fallback for orphaned shells: Claude Code sometimes omits task-notifications when a
+            // shell is killed implicitly (user interrupts the session, conversation branch changes,
+            // session goes away). If the output file exists but hasn't been written to in the last
+            // 5 minutes, the shell is no longer producing output and can be considered done.
+            if (tasksDir != null && IsOutputFileStale(tasksDir, shellId, staleCutoff))
+                continue;
             var label = string.IsNullOrWhiteSpace(info.Command) ? "shell" : info.Command;
             shells.Add(new BackgroundShell(shellId, label, info.Tool));
         }
 
         return new SessionChildren(subAgents, shells);
+    }
+
+    // transcript: ~/.claude/projects/{enc-cwd}/{sessionId}.jsonl
+    // tasks dir:  %LOCALAPPDATA%/Temp/claude/{enc-cwd}/{sessionId}/tasks
+    private static string? TasksDir(string transcriptPath)
+    {
+        var sessionId = Path.GetFileNameWithoutExtension(transcriptPath);
+        var encCwd    = Path.GetFileName(Path.GetDirectoryName(transcriptPath));
+        if (string.IsNullOrEmpty(encCwd)) return null;
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return Path.Combine(localAppData, "Temp", "claude", encCwd, sessionId, "tasks");
+    }
+
+    private static bool IsOutputFileStale(string tasksDir, string shellId, DateTime cutoff)
+    {
+        try
+        {
+            var fi = new FileInfo(Path.Combine(tasksDir, shellId + ".output"));
+            return fi.Exists && fi.LastWriteTimeUtc < cutoff;
+        }
+        catch { return false; }
     }
 
     // Tool_result content is either a plain string or an array of {type:"text", text:...} blocks.
