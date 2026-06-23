@@ -279,9 +279,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         MaybeHandleAutoClose(sessions.Count);
     }
 
-    // Auto-close: only an auto-started tray with the setting on ever closes itself. Once at least one
-    // session has been seen, dropping back to zero arms the grace timer; any session reappearing
-    // cancels it. The setting is read live, so toggling it in settings takes effect immediately.
+    // Auto-close: only an auto-started tray with the setting on ever closes itself, so a manually-
+    // opened window never vanishes under the user. Once at least one session has been seen, dropping
+    // back to zero arms the grace timer; any session reappearing cancels it. The setting is read
+    // live, so toggling it in settings takes effect immediately.
     private void MaybeHandleAutoClose(int sessionCount)
     {
         if (!Program.AutoStarted || !_settings.AutoCloseAfterLastSession)
@@ -298,11 +299,18 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         }
 
         // Zero sessions: hold off until we've actually seen one (don't exit during the startup race),
-        // then start the grace countdown. Restart it from scratch on each zero reading.
+        // then start the grace countdown.
         if (!_seenSession)
             return;
 
-        _autoCloseTimer.Stop();
+        // Leave an already-running countdown alone. SessionsChanged fires on every scan (not just
+        // on a real change), so the 30s reconcile poll — plus any file write in ~/.claude/sessions
+        // (a busy session's .json heartbeat, a .mode rewrite) — re-enters here while still at zero.
+        // Re-arming on each of those would reset the grace period so it never elapsed; instead the
+        // countdown must measure time since sessions actually hit zero.
+        if (_autoCloseTimer.Enabled)
+            return;
+
         _autoCloseTimer.Start();
     }
 

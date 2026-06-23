@@ -13,10 +13,13 @@ internal enum PluginStatus
 {
     /// <summary>The <c>claude</c> CLI couldn't be located on PATH, so nothing can be installed.</summary>
     CliMissing,
+
     /// <summary>Marketplace and/or plugin are missing — offer "Enable".</summary>
     NeedsEnable,
+
     /// <summary>Installed and enabled, but a newer version exists upstream — offer "Update".</summary>
     UpdateAvailable,
+
     /// <summary>Installed, enabled, and current — nothing to do.</summary>
     UpToDate,
 }
@@ -37,19 +40,22 @@ internal sealed class PluginManager
     // *name* comes from that file's "name" field; the plugin id is "<plugin>@<marketplace>".
     private const string MarketplaceRepo = "ArcticGizmo/claude-watch";
     private const string MarketplaceName = "claude-watch";
-    private const string PluginName      = "claude-watch";
-    private const string PluginId        = PluginName + "@" + MarketplaceName;
+    private const string PluginName = "claude-watch";
+    private const string PluginId = PluginName + "@" + MarketplaceName;
 
-    private static readonly string UserHome =
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    private static readonly string UserHome = Environment.GetFolderPath(
+        Environment.SpecialFolder.UserProfile
+    );
 
-    private static string SettingsPath          => Path.Combine(UserHome, ".claude", "settings.json");
-    private static string InstalledPluginsPath  => Path.Combine(UserHome, ".claude", "plugins", "installed_plugins.json");
-    private static string MarketplaceClonePath  => Path.Combine(UserHome, ".claude", "plugins", "marketplaces", MarketplaceName);
+    private static string SettingsPath => Path.Combine(UserHome, ".claude", "settings.json");
+    private static string InstalledPluginsPath =>
+        Path.Combine(UserHome, ".claude", "plugins", "installed_plugins.json");
+    private static string MarketplaceClonePath =>
+        Path.Combine(UserHome, ".claude", "plugins", "marketplaces", MarketplaceName);
 
     /// <summary>The slash commands a user can paste into a session if the CLI isn't on PATH.</summary>
     public static string FallbackCommands =>
-        $"/plugin marketplace add {MarketplaceRepo}\n/plugin install {PluginId}";
+        $"/plugin marketplace add {MarketplaceRepo} --scope user\n/plugin install {PluginId} --scope user";
 
     // ── Quick state from settings.json (no subprocess) ───────────────────────────────
     /// <summary>
@@ -68,15 +74,15 @@ internal sealed class PluginManager
             var root = doc.RootElement;
 
             bool marketplace =
-                root.TryGetProperty("extraKnownMarketplaces", out var mkts) &&
-                mkts.ValueKind == JsonValueKind.Object &&
-                mkts.TryGetProperty(MarketplaceName, out _);
+                root.TryGetProperty("extraKnownMarketplaces", out var mkts)
+                && mkts.ValueKind == JsonValueKind.Object
+                && mkts.TryGetProperty(MarketplaceName, out _);
 
             bool plugin =
-                root.TryGetProperty("enabledPlugins", out var plugins) &&
-                plugins.ValueKind == JsonValueKind.Object &&
-                plugins.TryGetProperty(PluginId, out var enabled) &&
-                enabled.ValueKind == JsonValueKind.True;
+                root.TryGetProperty("enabledPlugins", out var plugins)
+                && plugins.ValueKind == JsonValueKind.Object
+                && plugins.TryGetProperty(PluginId, out var enabled)
+                && enabled.ValueKind == JsonValueKind.True;
 
             return (marketplace, plugin);
         }
@@ -108,7 +114,9 @@ internal sealed class PluginManager
         // Refresh the local marketplace clone from its source so the comparison is against latest.
         await RunClaudeAsync($"plugin marketplace update {MarketplaceName}");
 
-        return await IsUpdateAvailableAsync() ? PluginStatus.UpdateAvailable : PluginStatus.UpToDate;
+        return await IsUpdateAvailableAsync()
+            ? PluginStatus.UpdateAvailable
+            : PluginStatus.UpToDate;
     }
 
     /// <summary>
@@ -127,7 +135,11 @@ internal sealed class PluginManager
 
         var latestVersion = ReadMarketplaceVersion();
         if (!string.IsNullOrEmpty(installedVersion) && !string.IsNullOrEmpty(latestVersion))
-            return !string.Equals(installedVersion, latestVersion, StringComparison.OrdinalIgnoreCase);
+            return !string.Equals(
+                installedVersion,
+                latestVersion,
+                StringComparison.OrdinalIgnoreCase
+            );
 
         return false;
     }
@@ -146,16 +158,21 @@ internal sealed class PluginManager
         var (marketplace, _) = ReadInstalledState();
         if (!marketplace)
         {
-            var add = await RunClaudeAsync($"plugin marketplace add {MarketplaceRepo}");
+            var add = await RunClaudeAsync(
+                $"plugin marketplace add {MarketplaceRepo} --scope user"
+            );
             if (add.exitCode != 0)
                 return (false, $"Adding marketplace failed: {FirstLine(add.output)}");
         }
 
-        var install = await RunClaudeAsync($"plugin install {PluginId}");
+        var install = await RunClaudeAsync($"plugin install {PluginId} --scope user");
         if (install.exitCode != 0)
             return (false, $"Install failed: {FirstLine(install.output)}");
 
-        return (true, "Claude Code plugin installed. Restart any open Claude Code sessions to load it.");
+        return (
+            true,
+            "Claude Code plugin installed. Restart any open Claude Code sessions to load it."
+        );
     }
 
     /// <summary>
@@ -173,7 +190,10 @@ internal sealed class PluginManager
         if (update.exitCode != 0)
             return (false, $"Update failed: {FirstLine(update.output)}");
 
-        return (true, "Claude Code plugin updated. Restart any open Claude Code sessions to load it.");
+        return (
+            true,
+            "Claude Code plugin updated. Restart any open Claude Code sessions to load it."
+        );
     }
 
     // ── On-disk reads ──────────────────────────────────────────────────────────────
@@ -186,16 +206,21 @@ internal sealed class PluginManager
             if (!File.Exists(InstalledPluginsPath))
                 return (null, null);
 
-            using var doc = JsonDocument.Parse(File.ReadAllText(InstalledPluginsPath), JsonLeniency);
-            if (!doc.RootElement.TryGetProperty("plugins", out var plugins) ||
-                !plugins.TryGetProperty(PluginId, out var entries) ||
-                entries.ValueKind != JsonValueKind.Array)
+            using var doc = JsonDocument.Parse(
+                File.ReadAllText(InstalledPluginsPath),
+                JsonLeniency
+            );
+            if (
+                !doc.RootElement.TryGetProperty("plugins", out var plugins)
+                || !plugins.TryGetProperty(PluginId, out var entries)
+                || entries.ValueKind != JsonValueKind.Array
+            )
                 return (null, null);
 
             foreach (var entry in entries.EnumerateArray())
             {
                 var version = entry.TryGetProperty("version", out var v) ? v.GetString() : null;
-                var sha     = entry.TryGetProperty("gitCommitSha", out var s) ? s.GetString() : null;
+                var sha = entry.TryGetProperty("gitCommitSha", out var s) ? s.GetString() : null;
                 return (version, sha);
             }
         }
@@ -209,26 +234,44 @@ internal sealed class PluginManager
     {
         try
         {
-            var marketplaceJson = Path.Combine(MarketplaceClonePath, ".claude-plugin", "marketplace.json");
+            var marketplaceJson = Path.Combine(
+                MarketplaceClonePath,
+                ".claude-plugin",
+                "marketplace.json"
+            );
             if (!File.Exists(marketplaceJson))
                 return null;
 
             string sourceRel = "./plugins/" + PluginName; // sensible default for our repo layout
             using (var doc = JsonDocument.Parse(File.ReadAllText(marketplaceJson), JsonLeniency))
             {
-                if (doc.RootElement.TryGetProperty("plugins", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                if (
+                    doc.RootElement.TryGetProperty("plugins", out var arr)
+                    && arr.ValueKind == JsonValueKind.Array
+                )
                     foreach (var p in arr.EnumerateArray())
-                        if (p.TryGetProperty("name", out var n) &&
-                            string.Equals(n.GetString(), PluginName, StringComparison.OrdinalIgnoreCase) &&
-                            p.TryGetProperty("source", out var src) && src.ValueKind == JsonValueKind.String)
+                        if (
+                            p.TryGetProperty("name", out var n)
+                            && string.Equals(
+                                n.GetString(),
+                                PluginName,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                            && p.TryGetProperty("source", out var src)
+                            && src.ValueKind == JsonValueKind.String
+                        )
                         {
                             sourceRel = src.GetString() ?? sourceRel;
                             break;
                         }
             }
 
-            var pluginJson = Path.Combine(MarketplaceClonePath, sourceRel.Replace('/', Path.DirectorySeparatorChar),
-                ".claude-plugin", "plugin.json");
+            var pluginJson = Path.Combine(
+                MarketplaceClonePath,
+                sourceRel.Replace('/', Path.DirectorySeparatorChar),
+                ".claude-plugin",
+                "plugin.json"
+            );
             if (!File.Exists(pluginJson))
                 return null;
 
@@ -249,7 +292,8 @@ internal sealed class PluginManager
     }
 
     // ── Process helpers ────────────────────────────────────────────────────────────
-    private async Task<bool> IsCliPresentAsync() => (await RunClaudeAsync("--version")).exitCode == 0;
+    private async Task<bool> IsCliPresentAsync() =>
+        (await RunClaudeAsync("--version")).exitCode == 0;
 
     // The marketplace clone's HEAD commit — the latest available version for a github source.
     private static async Task<string?> GitHeadShaAsync(string repoDir)
@@ -266,18 +310,21 @@ internal sealed class PluginManager
 
     // Runs a process, capturing combined stdout+stderr, with a hard timeout so a hung CLI/network
     // call can never wedge the UI. A non-zero exit code (including "command not found") is failure.
-    private static async Task<(int exitCode, string output)> RunProcessAsync(string fileName, string args)
+    private static async Task<(int exitCode, string output)> RunProcessAsync(
+        string fileName,
+        string args
+    )
     {
         try
         {
             var psi = new ProcessStartInfo
             {
-                FileName               = fileName,
-                Arguments              = args,
+                FileName = fileName,
+                Arguments = args,
                 RedirectStandardOutput = true,
-                RedirectStandardError  = true,
-                UseShellExecute        = false,
-                CreateNoWindow         = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
             };
 
             using var proc = Process.Start(psi);
@@ -294,13 +341,18 @@ internal sealed class PluginManager
             }
             catch (OperationCanceledException)
             {
-                try { proc.Kill(entireProcessTree: true); } catch { }
+                try
+                {
+                    proc.Kill(entireProcessTree: true);
+                }
+                catch { }
                 return (-1, "Timed out.");
             }
 
             var sb = new StringBuilder(await stdoutTask);
             var err = await stderrTask;
-            if (err.Length > 0) sb.Append(err);
+            if (err.Length > 0)
+                sb.Append(err);
             return (proc.ExitCode, sb.ToString());
         }
         catch
@@ -312,7 +364,7 @@ internal sealed class PluginManager
     private static readonly JsonDocumentOptions JsonLeniency = new()
     {
         AllowTrailingCommas = true,
-        CommentHandling     = JsonCommentHandling.Skip,
+        CommentHandling = JsonCommentHandling.Skip,
     };
 
     private static string FirstLine(string text)
