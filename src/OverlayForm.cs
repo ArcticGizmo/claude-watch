@@ -74,7 +74,7 @@ internal sealed class OverlayForm : Form
 
     private IReadOnlyList<ClaudeSession> _sessions = [];
     private List<DisplayRow> _rows = [];
-    private bool  _expanded;
+    private bool  _expanded = true;
     private bool  _dragging;
     private Point _dragStartScreen;
     private Point _formStartLoc;
