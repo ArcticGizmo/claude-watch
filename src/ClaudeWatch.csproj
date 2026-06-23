@@ -17,6 +17,7 @@
     <EmbeddedResource Include="icon.png" />
     <EmbeddedResource Include="..\logos\gitkraken.png" LogicalName="ClaudeWatch.gitkraken.png" />
     <EmbeddedResource Include="..\logos\slack.png"     LogicalName="ClaudeWatch.slack.png" />
+    <EmbeddedResource Include="..\CHANGELOG.md"        LogicalName="ClaudeWatch.CHANGELOG.md" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Markdig" Version="1.3.2" />
