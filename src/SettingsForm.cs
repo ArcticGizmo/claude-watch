@@ -39,9 +39,10 @@ internal sealed class SettingsForm : Form
     private readonly List<Label> _fluidWrap = new();
 
     // Usage section.
-    private ToggleSwitch     _usageToggle = null!;
-    private UsageBarsControl _usageBars   = null!;
-    private Button           _usageRefreshBtn = null!;
+    private ToggleSwitch     _usageToggle        = null!;
+    private ToggleSwitch     _expectedRateToggle = null!;
+    private UsageBarsControl _usageBars          = null!;
+    private Button           _usageRefreshBtn    = null!;
 
     // Notifications section. The master toggle gates the per-type sub-rows (toggle + Test button),
     // which dim while it's off.
@@ -77,6 +78,9 @@ internal sealed class SettingsForm : Form
 
     /// <summary>Raised when the user toggles "Show usage limits" (true = enabled).</summary>
     public event Action<bool>? UsageEnabledChanged;
+
+    /// <summary>Raised when the user toggles "Show expected rate marker" (true = enabled).</summary>
+    public event Action<bool>? ExpectedRateChanged;
 
     /// <summary>Raised when the user clicks "Check for Updates".</summary>
     public event EventHandler? CheckForUpdatesRequested;
@@ -492,12 +496,23 @@ internal sealed class SettingsForm : Form
         _usageToggle.CheckedChanged += (_, _) =>
         {
             UsageEnabledChanged?.Invoke(_usageToggle.Checked);
-            _usageRefreshBtn.Enabled = _usageToggle.Checked;
+            _usageRefreshBtn.Enabled    = _usageToggle.Checked;
+            _expectedRateToggle.Enabled = _usageToggle.Checked;
             _usageBars.SetOn(_usageToggle.Checked);
         };
         page.Controls.Add(TitleRow("Usage limits", _usageToggle));
 
         page.Controls.Add(BodyText("Your account-wide 5-hour and weekly rate-limit usage."));
+
+        _expectedRateToggle = MakeToggle();
+        _expectedRateToggle.Checked = _settings.ShowExpectedUsageRate;
+        _expectedRateToggle.Enabled = _settings.ShowUsage;
+        _expectedRateToggle.CheckedChanged += (_, _) =>
+        {
+            ExpectedRateChanged?.Invoke(_expectedRateToggle.Checked);
+            _usageBars.SetShowExpectedRate(_expectedRateToggle.Checked);
+        };
+        page.Controls.Add(TitleRow("Show expected rate", _expectedRateToggle));
 
         _usageBars = new UsageBarsControl { Margin = new Padding(0, 2, 0, 6) };
         _fluidWidth.Add((_usageBars, 0));

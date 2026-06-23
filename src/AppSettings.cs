@@ -12,6 +12,11 @@ internal sealed class AppSettings
     // Defaults to true; a missing key in an older settings file keeps this default.
     public bool ShowUsage { get; set; } = true;
 
+    // When on, a thin marker on each usage bar shows where consumption should be given the
+    // elapsed time in the current window (e.g. after 2 days of a 7-day period the marker sits
+    // at ~28%). Defaults to true; only visible while ShowUsage is also true.
+    public bool ShowExpectedUsageRate { get; set; } = true;
+
     // Master switch for Windows desktop (toast/balloon) notifications. When off, no session
     // balloon is ever shown; the overlay's own attention flash is unaffected. The per-type
     // switches below only take effect while this is on.

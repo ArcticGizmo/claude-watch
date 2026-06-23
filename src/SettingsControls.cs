@@ -22,7 +22,8 @@ internal static class Theme
     public static readonly Color Yellow = Color.FromArgb(250, 204, 21);
     public static readonly Color Orange = Color.FromArgb(251, 146, 60);
     public static readonly Color Red    = Color.FromArgb(239, 68, 68);
-    public static readonly Color Track  = Color.FromArgb(38, 38, 52);
+    public static readonly Color Track          = Color.FromArgb(38, 38, 52);
+    public static readonly Color ExpectedMark  = Color.FromArgb(180, 180, 195);
 
     public static Color ModeColor(PermissionMode m) => m switch
     {
@@ -202,6 +203,7 @@ internal sealed class UsageBarsControl : Control
 
     private UsageInfo _usage = UsageInfo.Empty;
     private bool _on = true;
+    private bool _showExpectedRate = true;
 
     public UsageBarsControl()
     {
@@ -210,8 +212,9 @@ internal sealed class UsageBarsControl : Control
         Height         = 74;
     }
 
-    public void SetUsage(UsageInfo usage) { _usage = usage; Invalidate(); }
-    public void SetOn(bool on)            { _on = on; Invalidate(); }
+    public void SetUsage(UsageInfo usage)         { _usage = usage; Invalidate(); }
+    public void SetOn(bool on)                    { _on = on; Invalidate(); }
+    public void SetShowExpectedRate(bool show)    { _showExpectedRate = show; Invalidate(); }
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -238,8 +241,10 @@ internal sealed class UsageBarsControl : Control
         }
 
         bool stale = _usage.IsStale(DateTime.Now);
-        DrawBar(g, 0,                "Session", _usage.FiveHourPercent, stale, capFont, pctFont);
-        DrawBar(g, BarRowHeight,     "Weekly",  _usage.SevenDayPercent, stale, capFont, pctFont);
+        double? sessionExpected = _showExpectedRate ? ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
+        double? weeklyExpected  = _showExpectedRate ? ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
+        DrawBar(g, 0,            "Session", _usage.FiveHourPercent, sessionExpected, stale, capFont, pctFont);
+        DrawBar(g, BarRowHeight, "Weekly",  _usage.SevenDayPercent, weeklyExpected,  stale, capFont, pctFont);
 
         // Footer: last-updated / staleness plus reset times.
         var parts = new List<string>
@@ -252,7 +257,7 @@ internal sealed class UsageBarsControl : Control
     }
 
     private void DrawBar(Graphics g, int rowTop, string caption, double? percent,
-                         bool stale, Font capFont, Font pctFont)
+                         double? expectedPct, bool stale, Font capFont, Font pctFont)
     {
         int midY = rowTop + BarRowHeight / 2;
 
@@ -294,9 +299,25 @@ internal sealed class UsageBarsControl : Control
             textColor = capColor;
         }
 
+        // Expected-rate marker: thin vertical bar at the elapsed-time position.
+        if (expectedPct is { } ep && trackW > 0)
+        {
+            int markerX = trackLeft + (int)Math.Round(trackW * ep / 100.0);
+            Color markerColor = stale ? Theme.Blend(Theme.ExpectedMark, BackColor, 0.5f) : Theme.ExpectedMark;
+            using var markerBrush = new SolidBrush(markerColor);
+            g.FillRectangle(markerBrush, markerX - 1, trackY - 1, 2, TrackH + 2);
+        }
+
         using var textBrush = new SolidBrush(textColor);
         var txtSz = g.MeasureString(pctText, pctFont);
         g.DrawString(pctText, pctFont, textBrush, Width - txtSz.Width, midY - txtSz.Height / 2);
+    }
+
+    private static double? ElapsedPercent(DateTime? resetsAt, TimeSpan window)
+    {
+        if (resetsAt is null) return null;
+        var elapsed = DateTime.Now - (resetsAt.Value - window);
+        return Math.Clamp(elapsed.TotalSeconds / window.TotalSeconds * 100.0, 0, 100);
     }
 
     private static void FillRoundedBar(Graphics g, Brush brush, int x, int y, int w, int h)

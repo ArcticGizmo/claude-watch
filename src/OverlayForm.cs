@@ -106,6 +106,7 @@ internal sealed class OverlayForm : Form
 
     private UsageInfo _usage = UsageInfo.Empty;
     private bool _usageEnabled = true;
+    private bool _showExpectedRate = true;
     private bool _inUsageStrip;
     private readonly UsageTooltipForm _usageTooltip = new();
 
@@ -286,6 +287,13 @@ internal sealed class OverlayForm : Form
             HideUsageTooltip();
         }
         RelayoutWindow();
+        Invalidate();
+    }
+
+    public void SetShowExpectedRate(bool show)
+    {
+        if (_showExpectedRate == show) return;
+        _showExpectedRate = show;
         Invalidate();
     }
 
@@ -857,12 +865,14 @@ internal sealed class OverlayForm : Form
         using var pctFont = new Font("Segoe UI", 7.5f, FontStyle.Bold,    GraphicsUnit.Point);
 
         int top = HeaderHeight + 2;
-        DrawUsageBar(g, top,                 "Session", _usage.FiveHourPercent, stale, capFont, pctFont);
-        DrawUsageBar(g, top + BarRowHeight,  "Weekly",  _usage.SevenDayPercent, stale, capFont, pctFont);
+        double? sessionExpected = _showExpectedRate ? ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
+        double? weeklyExpected  = _showExpectedRate ? ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
+        DrawUsageBar(g, top,                "Session", _usage.FiveHourPercent, sessionExpected, stale, capFont, pctFont);
+        DrawUsageBar(g, top + BarRowHeight, "Weekly",  _usage.SevenDayPercent, weeklyExpected,  stale, capFont, pctFont);
     }
 
     private void DrawUsageBar(Graphics g, int rowTop, string caption, double? percent,
-                              bool stale, Font capFont, Font pctFont)
+                              double? expectedPct, bool stale, Font capFont, Font pctFont)
     {
         const int CaptionW = 46;
         const int PctW     = 34;
@@ -911,10 +921,27 @@ internal sealed class OverlayForm : Form
             textColor = capColor;
         }
 
+        // Expected-rate marker: thin vertical bar at the elapsed-time position.
+        if (expectedPct is { } ep && trackW > 0)
+        {
+            int markerX = trackLeft + (int)Math.Round(trackW * ep / 100.0);
+            Color markerColor = Color.FromArgb(180, 180, 195);
+            if (stale) markerColor = Blend(markerColor, BgColor, 0.5f);
+            using var markerBrush = new SolidBrush(markerColor);
+            g.FillRectangle(markerBrush, markerX - 1, trackY - 1, 2, TrackH + 2);
+        }
+
         using var textBrush = new SolidBrush(textColor);
         var txtSz = g.MeasureString(pctText, pctFont);
         g.DrawString(pctText, pctFont, textBrush,
             ClientSize.Width - HorizPad - txtSz.Width, midY - txtSz.Height / 2);
+    }
+
+    private static double? ElapsedPercent(DateTime? resetsAt, TimeSpan window)
+    {
+        if (resetsAt is null) return null;
+        var elapsed = DateTime.Now - (resetsAt.Value - window);
+        return Math.Clamp(elapsed.TotalSeconds / window.TotalSeconds * 100.0, 0, 100);
     }
 
     // Colour thresholds: <50 green, 50–75 yellow, 75–90 orange, 90+ red.

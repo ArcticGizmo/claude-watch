@@ -135,6 +135,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         _overlay.Show();
         _overlay.SetUsageEnabled(_settings.ShowUsage);
+        _overlay.SetShowExpectedRate(_settings.ShowExpectedUsageRate);
         _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
         _overlay.SetGitKrakenEnabled(_settings.ShowGitKraken);
         _overlay.SetSlackEnabled(_settings.ShowSlack);
@@ -189,6 +190,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         _settingsForm = new SettingsForm(_settings, _usageMonitor, _lastUsage);
         _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
+        _settingsForm.ExpectedRateChanged    += SetExpectedRateEnabled;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
         _settingsForm.TestNotificationRequested += ShowTestNotification;
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
@@ -244,6 +246,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         {
             _usageTimer.Stop();
         }
+    }
+
+    private void SetExpectedRateEnabled(bool enabled)
+    {
+        if (_settings.ShowExpectedUsageRate == enabled) return;
+        _settings.ShowExpectedUsageRate = enabled;
+        _settings.Save();
+        _overlay.SetShowExpectedRate(enabled);
     }
 
     // Fetches usage off the UI thread, then pushes the result back onto it for rendering in both
