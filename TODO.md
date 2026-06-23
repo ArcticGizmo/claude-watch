@@ -4,3 +4,4 @@
 - improve the readme to shoow all the features off
 - embedd changelog into application
 - add an "expected rate" indicator to session limits to see if you are on track
+- make claude code always open expanded

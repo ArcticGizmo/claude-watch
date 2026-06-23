@@ -56,8 +56,8 @@ internal sealed class OverlayForm : Form
     private static readonly Color MutedColor     = Color.FromArgb(110, 110, 130);
     private static readonly Color SepColor       = Color.FromArgb(35,  35,  50);
     private static readonly Color RowHoverColor  = Color.FromArgb(25,  25,  38);
-    private static readonly Color SubAgentColor  = Color.FromArgb(56,  189, 248);
-    private static readonly Color ShellColor     = Color.FromArgb(167, 139, 250);
+    private static readonly Color SubAgentColor  = Color.FromArgb(167, 139, 250);
+    private static readonly Color ShellColor     = Color.FromArgb(56,  189, 248);
     private static readonly Color RemoteColor    = Color.FromArgb(96,  165, 250);
     private static readonly Color MailColor      = Color.FromArgb(94,  234, 212);
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
