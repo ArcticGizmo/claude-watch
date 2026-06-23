@@ -23,7 +23,7 @@ internal sealed class OverlayForm : Form
     private const int Corner            = 10;
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
     private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
-    private const int IntegrationsRowHeight = 24; // height of the integrations icon strip below the usage bars
+    private const int QuickLinksRowHeight = 24; // height of the quick-links icon strip below the usage bars
 
     // Default vertical gap below the top of the working area for the floating panel. Sized to
     // clear most applications' window-control (close/minimize) buttons.
@@ -112,12 +112,12 @@ internal sealed class OverlayForm : Form
     private bool _gitKrakenEnabled;
     private bool _slackEnabled;
     // -1 = none hovered, 0 = GitKraken, 1 = Slack
-    private int  _hoveredIntegration = -1;
+    private int  _hoveredQuickLink = -1;
 
-    private bool HasIntegrationsRow => _gitKrakenEnabled || _slackEnabled;
+    private bool HasQuickLinksRow => _gitKrakenEnabled || _slackEnabled;
 
-    // Top of the session rows when expanded: header, plus the usage strip and optional integrations row.
-    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (HasIntegrationsRow ? IntegrationsRowHeight : 0);
+    // Top of the session rows when expanded: header, plus the usage strip and optional quick-links row.
+    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (HasQuickLinksRow ? QuickLinksRowHeight : 0);
 
     private readonly System.Windows.Forms.Timer _flashTimer;
     private readonly System.Windows.Forms.Timer _flashStopTimer;
@@ -136,7 +136,7 @@ internal sealed class OverlayForm : Form
 
     // The claude-watch icon, shown atop the dense strip purely for flair. Null if unavailable.
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
-    // Integration icons, extracted from each installed executable on startup. Null if not installed.
+    // Quick-link icons, loaded from embedded resources (with exe-extraction fallback). Null if unavailable.
     private readonly Bitmap? _gitKrakenIcon = LoadGitKrakenIcon(18);
     private readonly Bitmap? _slackIcon     = LoadSlackIcon(18);
 
@@ -423,8 +423,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 h += UsageStripHeight;  // usage bars sit between the header and the rows
-            if (HasIntegrationsRow)
-                h += IntegrationsRowHeight;
+            if (HasQuickLinksRow)
+                h += QuickLinksRowHeight;
             foreach (var row in _rows)
                 h += HeightOf(row);
             h += 2;
@@ -605,8 +605,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 DrawUsageBars(g);
-            if (HasIntegrationsRow)
-                DrawIntegrationsRow(g);
+            if (HasQuickLinksRow)
+                DrawQuickLinksRow(g);
             for (int i = 0; i < _rows.Count; i++)
                 DrawRow(g, i);
         }
@@ -941,17 +941,17 @@ internal sealed class OverlayForm : Form
         g.FillPath(brush, path);
     }
 
-    // ── Integrations row ──────────────────────────────────────────────────────
-    // Draws enabled integration icons side-by-side, centred horizontally.
-    // Integration indices: 0 = GitKraken, 1 = Slack.
-    private void DrawIntegrationsRow(Graphics g)
+    // ── Quick links row ───────────────────────────────────────────────────────
+    // Draws enabled quick-link icons side-by-side, centred horizontally.
+    // Quick-link indices: 0 = GitKraken, 1 = Slack.
+    private void DrawQuickLinksRow(Graphics g)
     {
         const int IconSize = 16;
         const int IconGap  = 14;
         const int HitPad   = 4;
 
         int rowTop  = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
-        int centerY = rowTop + IntegrationsRowHeight / 2;
+        int centerY = rowTop + QuickLinksRowHeight / 2;
 
         // Build ordered list of enabled icons.
         var slots = new List<(Bitmap? icon, string fallback, Color fallbackColor, int index)>();
@@ -967,7 +967,7 @@ internal sealed class OverlayForm : Form
             int iconX = startX + i * (IconSize + IconGap);
             int iconY = centerY - IconSize / 2;
 
-            if (_hoveredIntegration == index)
+            if (_hoveredQuickLink == index)
             {
                 using var hover = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
                 g.FillRectangle(hover,
@@ -990,12 +990,12 @@ internal sealed class OverlayForm : Form
         }
     }
 
-    // Returns the integration index (0=GitKraken, 1=Slack) under point p, or -1 if none.
-    private int HitTestIntegration(Point p)
+    // Returns the quick-link index (0=GitKraken, 1=Slack) under point p, or -1 if none.
+    private int HitTestQuickLink(Point p)
     {
-        if (!HasIntegrationsRow) return -1;
+        if (!HasQuickLinksRow) return -1;
         int rowTop = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
-        if (p.Y < rowTop || p.Y >= rowTop + IntegrationsRowHeight) return -1;
+        if (p.Y < rowTop || p.Y >= rowTop + QuickLinksRowHeight) return -1;
 
         const int IconSize = 16;
         const int IconGap  = 14;
@@ -1397,11 +1397,11 @@ internal sealed class OverlayForm : Form
                 }
             }
 
-            // Integration icons row hover (per-icon hit test).
-            int hovered = ShowFullPanel ? HitTestIntegration(e.Location) : -1;
-            if (hovered != _hoveredIntegration)
+            // Quick-link icons row hover (per-icon hit test).
+            int hovered = ShowFullPanel ? HitTestQuickLink(e.Location) : -1;
+            if (hovered != _hoveredQuickLink)
             {
-                _hoveredIntegration = hovered;
+                _hoveredQuickLink = hovered;
                 Cursor = hovered >= 0 ? Cursors.Hand : Cursors.Default;
                 Invalidate();
             }
@@ -1451,7 +1451,7 @@ internal sealed class OverlayForm : Form
                     if (int.TryParse(pid, out int pidInt))
                         NativeMethods.FocusTerminalForProcess(pidInt);
                 }
-                else if (HitTestIntegration(e.Location) is var integ && integ >= 0)
+                else if (HitTestQuickLink(e.Location) is var integ && integ >= 0)
                 {
                     if (integ == 0) LaunchOrFocusGitKraken();
                     else if (integ == 1) LaunchOrFocusSlack();
@@ -1487,7 +1487,7 @@ internal sealed class OverlayForm : Form
         _inUsageStrip = false;
         _usageHoverTimer.Stop();
         HideUsageTooltip();
-        if (_hoveredIntegration >= 0) { _hoveredIntegration = -1; Cursor = Cursors.Default; }
+        if (_hoveredQuickLink >= 0) { _hoveredQuickLink = -1; Cursor = Cursors.Default; }
 
         // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
         // where the cursor legitimately roams to another monitor's drop lane.

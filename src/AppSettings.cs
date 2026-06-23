@@ -50,7 +50,7 @@ internal sealed class AppSettings
     public bool AutoStartOnFirstSession  { get; set; }
     public bool AutoCloseAfterLastSession { get; set; }
 
-    // Integrations. Icons displayed below the usage bars; each opens the app or focuses it.
+    // Quick links. Icons displayed below the usage bars; each opens the app or focuses it.
     public bool ShowGitKraken { get; set; }
     public bool ShowSlack     { get; set; }
 

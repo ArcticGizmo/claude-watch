@@ -69,7 +69,7 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _autoStartToggle = null!;
     private ToggleSwitch _autoCloseToggle = null!;
 
-    // Integrations section.
+    // Quick links section.
     private ToggleSwitch _gitKrakenToggle = null!;
     private ToggleSwitch _slackToggle     = null!;
 
@@ -153,7 +153,7 @@ internal sealed class SettingsForm : Form
         AddPage("usage",        "Usage Limits",    BuildUsagePage);
         AddPage("notify",       "Notifications",   BuildNotificationsPage);
         AddPage("auto",         "Automation",      BuildAutomationPage);
-        AddPage("integrations", "Integrations",    BuildIntegrationsPage);
+        AddPage("quicklinks",   "Quick Links",      BuildQuickLinksPage);
         AddPage("about",        "About",           BuildAboutPage);
 
         // Add the Fill host first (so it sits behind) and the Left rail second, so the rail claims
@@ -862,11 +862,11 @@ internal sealed class SettingsForm : Form
             "it was started automatically by the option above. A window you opened yourself stays open."));
     }
 
-    // ── Integrations ──────────────────────────────────────────────────────────────
-    private void BuildIntegrationsPage(FlowLayoutPanel page)
+    // ── Quick links ───────────────────────────────────────────────────────────────
+    private void BuildQuickLinksPage(FlowLayoutPanel page)
     {
         page.Controls.Add(BodyText(
-            "Show app icons below the usage bars in the overlay. " +
+            "Show quick-link icons below the usage bars in the overlay. " +
             "Click an icon to open that app or bring it to focus if it is already running."));
 
         page.Controls.Add(Separator());
