@@ -1,0 +1,167 @@
+# Changelog
+
+All notable changes to Claude Watch are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+---
+
+## [Unreleased]
+
+_(nothing — unless you count this very changelog)_
+
+---
+
+## [v0.0.29] - 2026-06-23
+
+- Agent colour changed to purple (correct all along)
+- Right-click to copy session ID
+- Open session transcript directly from the UI
+- Clickable links in session view
+- Quick Links — formerly "Integrations", a name that lasted until it didn't
+- GitKraken and Slack added as quick-link targets
+- Claude Watch now always starts expanded
+- Added expected rate display to usage limits
+
+## [v0.0.28] - 2026-06-23
+
+- Auto-close now shows a countdown so you can watch your fate approach
+
+## [v0.0.27] - 2026-06-23
+
+- Updates made "a little less buggy" (source: commit message; exact improvement unquantified)
+
+## [v0.0.26] - 2026-06-23
+
+- Fixed auto-close not actually closing anything
+
+## [v0.0.25] - 2026-06-22
+
+- Sessions can now be automatically started and stopped
+
+## [v0.0.24] - 2026-06-22
+
+- Settings form completely reworked — new layout, more coherent, larger
+
+## [v0.0.23] - 2026-06-22
+
+- Reworked the invoke mechanism
+- Dock overlay to the left side (right-side supremacy: contested)
+- Increased default padding so things breathe
+
+## [v0.0.22] - 2026-06-22
+
+- Added ability to dock to the left side
+
+## [v0.0.21] - 2026-06-22
+
+- Increased default padding
+
+## [v0.0.20] - 2026-06-22
+
+- Made the remote control icon more noticeable (it was there before, quietly)
+
+## [v0.0.19] - 2026-06-22
+
+- Added auto plugin for automatic session management
+
+## [v0.0.18] - 2026-06-22
+
+- Added singleton enforcement — one instance, no negotiations
+- Renamed the executable to be more CLI-friendly
+- Plugin consolidation — fewer moving parts
+- Added in-app configuration settings
+- Immediately reverted in-app configuration settings (a bold 3-minute experiment)
+
+## [v0.0.17] - 2026-06-21
+
+- Send notifications when the machine is locked
+- ntfy notifications now include a direct link to the remote session
+
+## [v0.0.16] - 2026-06-21
+
+- Added link to remote session in ntfy notification
+
+## [v0.0.15] - 2026-06-21
+
+- **History viewer** — browse past session transcripts with markdown rendering and clickable images
+
+## [v0.0.14] - 2026-06-21
+
+- **External notifications via ntfy.sh** — push alerts to your phone, with QR code setup
+
+## [v0.0.13] - 2026-06-21
+
+- **Remote control** — generate a QR code to control sessions from another device
+- Notification settings
+- Hid git worktrees from the session list (they are not sessions; they are a trap)
+
+## [v0.0.12] - 2026-06-20
+
+- Settings UI — all configuration in one place
+
+## [v0.0.11] - 2026-06-20
+
+- Dense mode — compact layout for the minimalists among us
+
+## [v0.0.10] - 2026-06-20
+
+- Removed taskbar sprites (they had a good run)
+- Plan mode icon made consistent and less confusing
+
+## [v0.0.9] - 2026-06-20
+
+- Session limits — cap how many sessions run concurrently
+
+## [v0.0.8] - 2026-06-20
+
+- Elapsed time shown per session
+
+## [v0.0.7] - 2026-06-20
+
+- Live activity indicator per session
+
+## [v0.0.6] - 2026-06-20
+
+- Subagent display — sub-agents now surface alongside their parent sessions
+
+## [v0.0.5] - 2026-06-19
+
+- Plugin system introduced
+- Permission monitor hooks — write-mode and cleanup-mode scripts
+
+## [v0.0.4] - 2026-06-19
+
+- Event-driven session state (no more polling for what's changed)
+- "Needs attention" detection — properly identifies when Claude is waiting on you
+- Clicking a notification now opens the relevant Claude instance
+
+## [v0.0.3] - 2026-06-19
+
+- Updated application icon
+
+## [v0.0.2] - 2026-06-18
+
+- Fixed dragging the overlay preventing subsequent clicks
+
+## [v0.0.1] - 2026-06-16
+
+- Velopack integration for auto-update releases
+
+---
+
+## [Pre-release] - 2026-06-12 to 2026-06-15
+
+Before versioning was a concept we took seriously.
+
+- Initial floating overlay implementation
+- One square per session — humble, correct
+- Drag to reposition (header only, after learning why that matters)
+- Tooltip on hover; right-aligned; no bottom gap
+- Clicking the overlay correctly focuses the terminal
+- Session sprites: started with ducks, added cats, then quietly removed the word "cats" from the filenames (the cats remained and were never discussed again)
+- Sessions ordered by name
+- Swappable sprite sets
+- Transparent overlay made clickable
+- Permission mode support — indicators reflect Claude's current permission level
+- Wolfenstein-inspired icons for permission mode (this is in the git history and cannot be undone)
+- Updated app icon
