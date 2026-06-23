@@ -37,6 +37,9 @@ internal sealed class SessionChildReader
     );
 
     private readonly Dictionary<string, CacheEntry> _cache = new();
+    // Tracks when each shell ID was first returned as "running" by this instance.
+    // Used to retire orphaned shells whose output file was never created.
+    private readonly Dictionary<string, DateTime> _shellFirstSeen = new();
 
     private static readonly Regex TaskIdRegex = new(@"<task-id>([A-Za-z0-9]+)</task-id>", RegexOptions.Compiled);
     private static readonly Regex TerminalStatusRegex = new(@"<status>(completed|failed|killed)</status>", RegexOptions.Compiled);
@@ -64,15 +67,20 @@ internal sealed class SessionChildReader
         try
         {
             var fi = new FileInfo(path);
+            SessionChildren result;
             if (
                 _cache.TryGetValue(path, out var cached)
                 && cached.Length == fi.Length
                 && cached.WriteUtc == fi.LastWriteTimeUtc
             )
-                return cached.Result;
+                result = cached.Result;
+            else
+            {
+                result = Parse(path);
+                _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
+            }
 
-            var result = Parse(path);
-            _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
+            result = ApplyFirstSeenCleanup(result, TasksDir(path));
             return result;
         }
         catch
@@ -180,6 +188,10 @@ internal sealed class SessionChildReader
             if (node?["message"]?["content"] is not JsonArray content)
                 continue;
 
+            // The structured toolUseResult field carries the background task id directly —
+            // prefer it over regex-parsing the content string when it is present.
+            var bgTaskId = node["toolUseResult"]?["backgroundTaskId"]?.GetValue<string>();
+
             foreach (var block in content)
             {
                 var type = block?["type"]?.GetValue<string>();
@@ -226,14 +238,20 @@ internal sealed class SessionChildReader
                         continue;
                     resultIds.Add(rid);
 
-                    // The spawn result of a background shell carries its shell id; record it only
-                    // for tool_use ids we've seen launch a background shell.
+                    // The spawn result of a background shell carries its shell id.
+                    // Prefer the structured toolUseResult.backgroundTaskId field; fall back to
+                    // regex-parsing the content string for older transcript formats.
                     if (shellUses.ContainsKey(rid))
                     {
-                        var text = ResultText(block["content"]);
-                        var m = BackgroundIdRegex.Match(text);
-                        if (m.Success)
-                            shellIdByUseId[rid] = m.Groups[1].Value;
+                        if (!string.IsNullOrEmpty(bgTaskId))
+                            shellIdByUseId[rid] = bgTaskId;
+                        else
+                        {
+                            var text = ResultText(block["content"]);
+                            var m = BackgroundIdRegex.Match(text);
+                            if (m.Success)
+                                shellIdByUseId[rid] = m.Groups[1].Value;
+                        }
                     }
                 }
             }
@@ -251,7 +269,7 @@ internal sealed class SessionChildReader
         }
 
         var tasksDir = TasksDir(path);
-        var staleCutoff = DateTime.UtcNow - TimeSpan.FromMinutes(5);
+        var staleCutoff = DateTime.UtcNow - TimeSpan.FromMinutes(30);
 
         var shells = new List<BackgroundShell>();
         var seenShellIds = new HashSet<string>();
@@ -270,7 +288,7 @@ internal sealed class SessionChildReader
             // Fallback for orphaned shells: Claude Code sometimes omits task-notifications when a
             // shell is killed implicitly (user interrupts the session, conversation branch changes,
             // session goes away). If the output file exists but hasn't been written to in the last
-            // 5 minutes, the shell is no longer producing output and can be considered done.
+            // 30 minutes, the shell is no longer producing output and can be considered done.
             if (tasksDir != null && IsOutputFileStale(tasksDir, shellId, staleCutoff))
                 continue;
             var label = string.IsNullOrWhiteSpace(info.Command) ? "shell" : info.Command;
@@ -278,6 +296,36 @@ internal sealed class SessionChildReader
         }
 
         return new SessionChildren(subAgents, shells);
+    }
+
+    // Maintains _shellFirstSeen and retires shells whose output file never appeared after 30 min.
+    private SessionChildren ApplyFirstSeenCleanup(SessionChildren result, string? tasksDir)
+    {
+        var now = DateTime.UtcNow;
+
+        foreach (var shell in result.Shells)
+            _shellFirstSeen.TryAdd(shell.ShellId, now);
+
+        // Drop tracking for shells no longer in the running list.
+        var activeIds = new HashSet<string>(result.Shells.Select(s => s.ShellId));
+        foreach (var key in _shellFirstSeen.Keys.Where(k => !activeIds.Contains(k)).ToList())
+            _shellFirstSeen.Remove(key);
+
+        if (tasksDir == null)
+            return result;
+
+        // Retire shells with no output file that have been "running" for > 30 minutes.
+        // Shells that do have an output file are handled by the stale-file check in Parse().
+        var filtered = result.Shells.Where(shell =>
+        {
+            if (!_shellFirstSeen.TryGetValue(shell.ShellId, out var firstSeen)) return true;
+            if ((now - firstSeen).TotalMinutes < 30) return true;
+            return File.Exists(Path.Combine(tasksDir, shell.ShellId + ".output"));
+        }).ToList();
+
+        return filtered.Count == result.Shells.Count
+            ? result
+            : new SessionChildren(result.SubAgents, filtered);
     }
 
     // transcript: ~/.claude/projects/{enc-cwd}/{sessionId}.jsonl
