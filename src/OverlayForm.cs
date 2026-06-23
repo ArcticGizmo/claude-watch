@@ -23,6 +23,7 @@ internal sealed class OverlayForm : Form
     private const int Corner            = 10;
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
     private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
+    private const int GitKrakenRowHeight= 24;  // height of the GitKraken icon row below the usage bars
 
     // Default vertical gap below the top of the working area for the floating panel. Sized to
     // clear most applications' window-control (close/minimize) buttons.
@@ -108,8 +109,11 @@ internal sealed class OverlayForm : Form
     private bool _inUsageStrip;
     private readonly UsageTooltipForm _usageTooltip = new();
 
-    // Top of the session rows when expanded: header, plus the usage strip when it's shown.
-    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+    private bool _gitKrakenEnabled;
+    private bool _inGitKrakenRow;
+
+    // Top of the session rows when expanded: header, plus the usage strip and optional GitKraken row.
+    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (_gitKrakenEnabled ? GitKrakenRowHeight : 0);
 
     private readonly System.Windows.Forms.Timer _flashTimer;
     private readonly System.Windows.Forms.Timer _flashStopTimer;
@@ -128,6 +132,8 @@ internal sealed class OverlayForm : Form
 
     // The claude-watch icon, shown atop the dense strip purely for flair. Null if unavailable.
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+    // GitKraken app icon, extracted from the installed executable on startup. Null if not installed.
+    private readonly Bitmap? _gitKrakenIcon = LoadGitKrakenIcon(18);
 
     // Is the full session body (usage bars + rows) currently on screen? In floating mode that's
     // the expanded state; in dense mode it's the hover-opened popup.
@@ -278,6 +284,14 @@ internal sealed class OverlayForm : Form
         Invalidate();
     }
 
+    public void SetGitKrakenEnabled(bool enabled)
+    {
+        if (_gitKrakenEnabled == enabled) return;
+        _gitKrakenEnabled = enabled;
+        RelayoutWindow();
+        Invalidate();
+    }
+
     // Whether external (ntfy) notifications are switched on globally. Controls whether the per-session
     // mail glyph and the right-click enable/disable item appear at all.
     public void SetExternalNotificationsAvailable(bool available)
@@ -396,6 +410,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 h += UsageStripHeight;  // usage bars sit between the header and the rows
+            if (_gitKrakenEnabled)
+                h += GitKrakenRowHeight;
             foreach (var row in _rows)
                 h += HeightOf(row);
             h += 2;
@@ -576,6 +592,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 DrawUsageBars(g);
+            if (_gitKrakenEnabled)
+                DrawGitKrakenRow(g);
             for (int i = 0; i < _rows.Count; i++)
                 DrawRow(g, i);
         }
@@ -910,6 +928,95 @@ internal sealed class OverlayForm : Form
         g.FillPath(brush, path);
     }
 
+    // ── GitKraken row ─────────────────────────────────────────────────────────
+    private void DrawGitKrakenRow(Graphics g)
+    {
+        int rowTop   = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+        int centerX  = ClientSize.Width / 2;
+        int centerY  = rowTop + GitKrakenRowHeight / 2;
+        const int IconSize = 16;
+
+        if (_inGitKrakenRow)
+        {
+            using var hover = new SolidBrush(Color.FromArgb(22, 255, 255, 255));
+            g.FillRectangle(hover, 0, rowTop, ClientSize.Width, GitKrakenRowHeight);
+        }
+
+        if (_gitKrakenIcon != null)
+        {
+            g.DrawImage(_gitKrakenIcon,
+                centerX - IconSize / 2, centerY - IconSize / 2, IconSize, IconSize);
+        }
+        else
+        {
+            // GitKraken not installed: draw a simple teal "GK" monogram as fallback.
+            using var font  = new Font("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
+            using var brush = new SolidBrush(Color.FromArgb(16, 179, 105));
+            var sz = g.MeasureString("GK", font);
+            g.DrawString("GK", font, brush, centerX - sz.Width / 2, centerY - sz.Height / 2);
+        }
+    }
+
+    private static string? TryFindGitKrakenExe()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var standalone = Path.Combine(local, "Programs", "GitKraken", "gitkraken.exe");
+        if (File.Exists(standalone)) return standalone;
+
+        var squirrelDir = Path.Combine(local, "gitkraken");
+        if (Directory.Exists(squirrelDir))
+        {
+            foreach (var sub in Directory.GetDirectories(squirrelDir, "app-*")
+                                         .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                var exe = Path.Combine(sub, "gitkraken.exe");
+                if (File.Exists(exe)) return exe;
+            }
+        }
+
+        return null;
+    }
+
+    private static Bitmap? LoadGitKrakenIcon(int size)
+    {
+        try
+        {
+            var exe = TryFindGitKrakenExe();
+            if (exe == null) return null;
+            using var icon = Icon.ExtractAssociatedIcon(exe);
+            if (icon == null) return null;
+            using var bmp  = icon.ToBitmap();
+            var result = new Bitmap(size, size);
+            using var ig = Graphics.FromImage(result);
+            ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            ig.DrawImage(bmp, 0, 0, size, size);
+            return result;
+        }
+        catch { return null; }
+    }
+
+    private static void LaunchOrFocusGitKraken()
+    {
+        try
+        {
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName("gitkraken"))
+            {
+                if (p.MainWindowHandle != IntPtr.Zero)
+                {
+                    NativeMethods.FocusWindow(p.MainWindowHandle);
+                    return;
+                }
+            }
+
+            var exe = TryFindGitKrakenExe();
+            if (exe != null)
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
+        }
+        catch { }
+    }
+
     private void DrawRow(Graphics g, int rowIdx)
     {
         if (_rows[rowIdx].IsSubAgent)
@@ -1166,8 +1273,9 @@ internal sealed class OverlayForm : Form
                 Invalidate();
             }
 
-            // Dwell over the usage strip (only present when the full panel shows) pops a details/staleness tooltip.
-            bool inStrip = ShowFullPanel && _usageEnabled && e.Y >= HeaderHeight && e.Y < RowsTop;
+            // Dwell over the usage strip (only the two bar rows, not the GitKraken row below them).
+            int usageStripEnd = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+            bool inStrip = ShowFullPanel && _usageEnabled && e.Y >= HeaderHeight && e.Y < usageStripEnd;
             if (inStrip != _inUsageStrip)
             {
                 _inUsageStrip = inStrip;
@@ -1181,6 +1289,15 @@ internal sealed class OverlayForm : Form
                     _usageHoverTimer.Stop();
                     HideUsageTooltip();
                 }
+            }
+
+            // GitKraken icon row hover.
+            bool inGkRow = ShowFullPanel && _gitKrakenEnabled && e.Y >= usageStripEnd && e.Y < usageStripEnd + GitKrakenRowHeight;
+            if (inGkRow != _inGitKrakenRow)
+            {
+                _inGitKrakenRow = inGkRow;
+                Cursor = inGkRow ? Cursors.Hand : Cursors.Default;
+                Invalidate();
             }
         }
 
@@ -1228,6 +1345,10 @@ internal sealed class OverlayForm : Form
                     if (int.TryParse(pid, out int pidInt))
                         NativeMethods.FocusTerminalForProcess(pidInt);
                 }
+                else if (ShowFullPanel && _gitKrakenEnabled && e.Y >= HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) && e.Y < RowsTop)
+                {
+                    LaunchOrFocusGitKraken();
+                }
                 else if (!_dense && e.Y < HeaderHeight && _sessions.Count > 0)
                 {
                     // Header click toggles expand/collapse — floating mode only.
@@ -1259,6 +1380,7 @@ internal sealed class OverlayForm : Form
         _inUsageStrip = false;
         _usageHoverTimer.Stop();
         HideUsageTooltip();
+        if (_inGitKrakenRow) { _inGitKrakenRow = false; Cursor = Cursors.Default; }
 
         // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
         // where the cursor legitimately roams to another monitor's drop lane.

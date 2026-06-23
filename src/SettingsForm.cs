@@ -69,6 +69,9 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _autoStartToggle = null!;
     private ToggleSwitch _autoCloseToggle = null!;
 
+    // Integrations section.
+    private ToggleSwitch _gitKrakenToggle = null!;
+
     private UsageInfo _usage;
 
     /// <summary>Raised when the user toggles "Show usage limits" (true = enabled).</summary>
@@ -85,6 +88,9 @@ internal sealed class SettingsForm : Form
 
     /// <summary>Raised when the user clicks "Send test notification" for the external (ntfy) channel.</summary>
     public event Action? TestExternalNotificationRequested;
+
+    /// <summary>Raised when the user toggles "Show GitKraken button" (true = enabled).</summary>
+    public event Action<bool>? GitKrakenEnabledChanged;
 
     public SettingsForm(AppSettings settings, UsageMonitor usageMonitor, UsageInfo currentUsage)
     {
@@ -138,12 +144,13 @@ internal sealed class SettingsForm : Form
         _contentHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.FormBg };
         _contentHost.Resize += (_, _) => ApplyFluidWidth();
 
-        AddPage("start",  "Getting started", BuildGettingStartedPage);
-        AddPage("plugin", "Plugin Control",  BuildPluginPage);
-        AddPage("usage",  "Usage Limits",    BuildUsagePage);
-        AddPage("notify", "Notifications",   BuildNotificationsPage);
-        AddPage("auto",   "Automation",      BuildAutomationPage);
-        AddPage("about",  "About",           BuildAboutPage);
+        AddPage("start",        "Getting started", BuildGettingStartedPage);
+        AddPage("plugin",       "Plugin Control",  BuildPluginPage);
+        AddPage("usage",        "Usage Limits",    BuildUsagePage);
+        AddPage("notify",       "Notifications",   BuildNotificationsPage);
+        AddPage("auto",         "Automation",      BuildAutomationPage);
+        AddPage("integrations", "Integrations",    BuildIntegrationsPage);
+        AddPage("about",        "About",           BuildAboutPage);
 
         // Add the Fill host first (so it sits behind) and the Left rail second, so the rail claims
         // its edge and the host fills the remainder.
@@ -849,6 +856,20 @@ internal sealed class SettingsForm : Form
         page.Controls.Add(BodyText(
             "Exit Claude Watch a short while after the last Claude Code session ends — but only when " +
             "it was started automatically by the option above. A window you opened yourself stays open."));
+    }
+
+    // ── Integrations ──────────────────────────────────────────────────────────────
+    private void BuildIntegrationsPage(FlowLayoutPanel page)
+    {
+        _gitKrakenToggle = MakeToggle();
+        _gitKrakenToggle.Checked = _settings.ShowGitKraken;
+        _gitKrakenToggle.CheckedChanged += (_, _) =>
+            GitKrakenEnabledChanged?.Invoke(_gitKrakenToggle.Checked);
+        page.Controls.Add(TitleRow("GitKraken", _gitKrakenToggle));
+
+        page.Controls.Add(BodyText(
+            "Show a GitKraken icon below the usage bars in the overlay. " +
+            "Click it to open GitKraken or bring it to focus if it is already running."));
     }
 
     // ── About ─────────────────────────────────────────────────────────────────────

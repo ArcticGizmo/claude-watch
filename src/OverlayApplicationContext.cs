@@ -136,6 +136,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.Show();
         _overlay.SetUsageEnabled(_settings.ShowUsage);
         _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
+        _overlay.SetGitKrakenEnabled(_settings.ShowGitKraken);
         _monitor.Scan();
 
         if (_settings.ShowUsage)
@@ -191,6 +192,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.TestNotificationRequested += ShowTestNotification;
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
         _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
+        _settingsForm.GitKrakenEnabledChanged += SetGitKrakenEnabled;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -427,6 +429,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settings.ExternalNotificationsEnabled = enabled;
         _settings.Save();
         _overlay.SetExternalNotificationsAvailable(enabled);
+    }
+
+    private void SetGitKrakenEnabled(bool enabled)
+    {
+        _settings.ShowGitKraken = enabled;
+        _settings.Save();
+        _overlay.SetGitKrakenEnabled(enabled);
     }
 
     // Pushes an external notification for a session, but only when the feature is on and that session

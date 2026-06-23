@@ -89,6 +89,10 @@ internal static class NativeMethods
     private static extern bool IsWindowVisible(IntPtr hWnd);
 
     [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [DllImport("user32.dll")]
@@ -137,6 +141,29 @@ internal static class NativeMethods
 
     private const int SW_RESTORE = 9;
     private const uint TH32CS_SNAPPROCESS = 0x00000002;
+
+    // Like ForceForeground but does NOT unconditionally SW_RESTORE — only restores when the window
+    // is actually minimized. SW_RESTORE on a non-minimized Electron window (e.g. GitKraken) can
+    // trigger an unwanted minimize-and-restore cycle instead of a simple bring-to-front.
+    internal static void FocusWindow(IntPtr hWnd)
+    {
+        if (IsIconic(hWnd))
+            ShowWindow(hWnd, SW_RESTORE);
+
+        uint foreThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+        uint thisThread = GetCurrentThreadId();
+
+        if (foreThread != 0 && foreThread != thisThread)
+        {
+            AttachThreadInput(foreThread, thisThread, true);
+            SetForegroundWindow(hWnd);
+            AttachThreadInput(foreThread, thisThread, false);
+        }
+        else
+        {
+            SetForegroundWindow(hWnd);
+        }
+    }
 
     internal static void FocusTerminalForProcess(int pid)
     {
