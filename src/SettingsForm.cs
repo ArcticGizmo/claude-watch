@@ -39,9 +39,10 @@ internal sealed class SettingsForm : Form
     private readonly List<Label> _fluidWrap = new();
 
     // Usage section.
-    private ToggleSwitch     _usageToggle = null!;
-    private UsageBarsControl _usageBars   = null!;
-    private Button           _usageRefreshBtn = null!;
+    private ToggleSwitch     _usageToggle        = null!;
+    private ToggleSwitch     _expectedRateToggle = null!;
+    private UsageBarsControl _usageBars          = null!;
+    private Button           _usageRefreshBtn    = null!;
 
     // Notifications section. The master toggle gates the per-type sub-rows (toggle + Test button),
     // which dim while it's off.
@@ -69,10 +70,17 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _autoStartToggle = null!;
     private ToggleSwitch _autoCloseToggle = null!;
 
+    // Quick links section.
+    private ToggleSwitch _gitKrakenToggle = null!;
+    private ToggleSwitch _slackToggle     = null!;
+
     private UsageInfo _usage;
 
     /// <summary>Raised when the user toggles "Show usage limits" (true = enabled).</summary>
     public event Action<bool>? UsageEnabledChanged;
+
+    /// <summary>Raised when the user toggles "Show expected rate marker" (true = enabled).</summary>
+    public event Action<bool>? ExpectedRateChanged;
 
     /// <summary>Raised when the user clicks "Check for Updates".</summary>
     public event EventHandler? CheckForUpdatesRequested;
@@ -85,6 +93,12 @@ internal sealed class SettingsForm : Form
 
     /// <summary>Raised when the user clicks "Send test notification" for the external (ntfy) channel.</summary>
     public event Action? TestExternalNotificationRequested;
+
+    /// <summary>Raised when the user toggles "Show GitKraken button" (true = enabled).</summary>
+    public event Action<bool>? GitKrakenEnabledChanged;
+
+    /// <summary>Raised when the user toggles "Show Slack button" (true = enabled).</summary>
+    public event Action<bool>? SlackEnabledChanged;
 
     public SettingsForm(AppSettings settings, UsageMonitor usageMonitor, UsageInfo currentUsage)
     {
@@ -138,12 +152,13 @@ internal sealed class SettingsForm : Form
         _contentHost = new Panel { Dock = DockStyle.Fill, BackColor = Theme.FormBg };
         _contentHost.Resize += (_, _) => ApplyFluidWidth();
 
-        AddPage("start",  "Getting started", BuildGettingStartedPage);
-        AddPage("plugin", "Plugin Control",  BuildPluginPage);
-        AddPage("usage",  "Usage Limits",    BuildUsagePage);
-        AddPage("notify", "Notifications",   BuildNotificationsPage);
-        AddPage("auto",   "Automation",      BuildAutomationPage);
-        AddPage("about",  "About",           BuildAboutPage);
+        AddPage("start",        "Getting started", BuildGettingStartedPage);
+        AddPage("plugin",       "Plugin Control",  BuildPluginPage);
+        AddPage("usage",        "Usage Limits",    BuildUsagePage);
+        AddPage("notify",       "Notifications",   BuildNotificationsPage);
+        AddPage("auto",         "Automation",      BuildAutomationPage);
+        AddPage("quicklinks",   "Quick Links",      BuildQuickLinksPage);
+        AddPage("about",        "About",           BuildAboutPage);
 
         // Add the Fill host first (so it sits behind) and the Left rail second, so the rail claims
         // its edge and the host fills the remainder.
@@ -481,12 +496,23 @@ internal sealed class SettingsForm : Form
         _usageToggle.CheckedChanged += (_, _) =>
         {
             UsageEnabledChanged?.Invoke(_usageToggle.Checked);
-            _usageRefreshBtn.Enabled = _usageToggle.Checked;
+            _usageRefreshBtn.Enabled    = _usageToggle.Checked;
+            _expectedRateToggle.Enabled = _usageToggle.Checked;
             _usageBars.SetOn(_usageToggle.Checked);
         };
         page.Controls.Add(TitleRow("Usage limits", _usageToggle));
 
         page.Controls.Add(BodyText("Your account-wide 5-hour and weekly rate-limit usage."));
+
+        _expectedRateToggle = MakeToggle();
+        _expectedRateToggle.Checked = _settings.ShowExpectedUsageRate;
+        _expectedRateToggle.Enabled = _settings.ShowUsage;
+        _expectedRateToggle.CheckedChanged += (_, _) =>
+        {
+            ExpectedRateChanged?.Invoke(_expectedRateToggle.Checked);
+            _usageBars.SetShowExpectedRate(_expectedRateToggle.Checked);
+        };
+        page.Controls.Add(TitleRow("Show expected rate", _expectedRateToggle));
 
         _usageBars = new UsageBarsControl { Margin = new Padding(0, 2, 0, 6) };
         _fluidWidth.Add((_usageBars, 0));
@@ -849,6 +875,30 @@ internal sealed class SettingsForm : Form
         page.Controls.Add(BodyText(
             "Exit Claude Watch a short while after the last Claude Code session ends — but only when " +
             "it was started automatically by the option above. A window you opened yourself stays open."));
+    }
+
+    // ── Quick links ───────────────────────────────────────────────────────────────
+    private void BuildQuickLinksPage(FlowLayoutPanel page)
+    {
+        page.Controls.Add(BodyText(
+            "Show quick-link icons below the usage bars in the overlay. " +
+            "Click an icon to open that app or bring it to focus if it is already running."));
+
+        page.Controls.Add(Separator());
+
+        _gitKrakenToggle = MakeToggle();
+        _gitKrakenToggle.Checked = _settings.ShowGitKraken;
+        _gitKrakenToggle.CheckedChanged += (_, _) =>
+            GitKrakenEnabledChanged?.Invoke(_gitKrakenToggle.Checked);
+        page.Controls.Add(TitleRow("GitKraken", _gitKrakenToggle));
+
+        page.Controls.Add(Separator());
+
+        _slackToggle = MakeToggle();
+        _slackToggle.Checked = _settings.ShowSlack;
+        _slackToggle.CheckedChanged += (_, _) =>
+            SlackEnabledChanged?.Invoke(_slackToggle.Checked);
+        page.Controls.Add(TitleRow("Slack", _slackToggle));
     }
 
     // ── About ─────────────────────────────────────────────────────────────────────

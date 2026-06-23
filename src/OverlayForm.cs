@@ -23,6 +23,7 @@ internal sealed class OverlayForm : Form
     private const int Corner            = 10;
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
     private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
+    private const int QuickLinksRowHeight = 24; // height of the quick-links icon strip below the usage bars
 
     // Default vertical gap below the top of the working area for the floating panel. Sized to
     // clear most applications' window-control (close/minimize) buttons.
@@ -56,7 +57,7 @@ internal sealed class OverlayForm : Form
     private static readonly Color MutedColor     = Color.FromArgb(110, 110, 130);
     private static readonly Color SepColor       = Color.FromArgb(35,  35,  50);
     private static readonly Color RowHoverColor  = Color.FromArgb(25,  25,  38);
-    private static readonly Color SubAgentColor  = Color.FromArgb(56,  189, 248);
+    private static readonly Color SubAgentColor  = Color.FromArgb(168, 85,  247);
     private static readonly Color RemoteColor    = Color.FromArgb(96,  165, 250);
     private static readonly Color MailColor      = Color.FromArgb(94,  234, 212);
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
@@ -73,7 +74,7 @@ internal sealed class OverlayForm : Form
 
     private IReadOnlyList<ClaudeSession> _sessions = [];
     private List<DisplayRow> _rows = [];
-    private bool  _expanded;
+    private bool  _expanded = true;
     private bool  _dragging;
     private Point _dragStartScreen;
     private Point _formStartLoc;
@@ -105,11 +106,19 @@ internal sealed class OverlayForm : Form
 
     private UsageInfo _usage = UsageInfo.Empty;
     private bool _usageEnabled = true;
+    private bool _showExpectedRate = true;
     private bool _inUsageStrip;
     private readonly UsageTooltipForm _usageTooltip = new();
 
-    // Top of the session rows when expanded: header, plus the usage strip when it's shown.
-    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+    private bool _gitKrakenEnabled;
+    private bool _slackEnabled;
+    // -1 = none hovered, 0 = GitKraken, 1 = Slack
+    private int  _hoveredQuickLink = -1;
+
+    private bool HasQuickLinksRow => _gitKrakenEnabled || _slackEnabled;
+
+    // Top of the session rows when expanded: header, plus the usage strip and optional quick-links row.
+    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (HasQuickLinksRow ? QuickLinksRowHeight : 0);
 
     private readonly System.Windows.Forms.Timer _flashTimer;
     private readonly System.Windows.Forms.Timer _flashStopTimer;
@@ -128,6 +137,9 @@ internal sealed class OverlayForm : Form
 
     // The claude-watch icon, shown atop the dense strip purely for flair. Null if unavailable.
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+    // Quick-link icons, loaded from embedded resources (with exe-extraction fallback). Null if unavailable.
+    private readonly Bitmap? _gitKrakenIcon = LoadGitKrakenIcon(18);
+    private readonly Bitmap? _slackIcon     = LoadSlackIcon(18);
 
     // Is the full session body (usage bars + rows) currently on screen? In floating mode that's
     // the expanded state; in dense mode it's the hover-opened popup.
@@ -278,6 +290,29 @@ internal sealed class OverlayForm : Form
         Invalidate();
     }
 
+    public void SetShowExpectedRate(bool show)
+    {
+        if (_showExpectedRate == show) return;
+        _showExpectedRate = show;
+        Invalidate();
+    }
+
+    public void SetGitKrakenEnabled(bool enabled)
+    {
+        if (_gitKrakenEnabled == enabled) return;
+        _gitKrakenEnabled = enabled;
+        RelayoutWindow();
+        Invalidate();
+    }
+
+    public void SetSlackEnabled(bool enabled)
+    {
+        if (_slackEnabled == enabled) return;
+        _slackEnabled = enabled;
+        RelayoutWindow();
+        Invalidate();
+    }
+
     // Whether external (ntfy) notifications are switched on globally. Controls whether the per-session
     // mail glyph and the right-click enable/disable item appear at all.
     public void SetExternalNotificationsAvailable(bool available)
@@ -396,6 +431,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 h += UsageStripHeight;  // usage bars sit between the header and the rows
+            if (HasQuickLinksRow)
+                h += QuickLinksRowHeight;
             foreach (var row in _rows)
                 h += HeightOf(row);
             h += 2;
@@ -576,6 +613,8 @@ internal sealed class OverlayForm : Form
         {
             if (_usageEnabled)
                 DrawUsageBars(g);
+            if (HasQuickLinksRow)
+                DrawQuickLinksRow(g);
             for (int i = 0; i < _rows.Count; i++)
                 DrawRow(g, i);
         }
@@ -826,12 +865,14 @@ internal sealed class OverlayForm : Form
         using var pctFont = new Font("Segoe UI", 7.5f, FontStyle.Bold,    GraphicsUnit.Point);
 
         int top = HeaderHeight + 2;
-        DrawUsageBar(g, top,                 "Session", _usage.FiveHourPercent, stale, capFont, pctFont);
-        DrawUsageBar(g, top + BarRowHeight,  "Weekly",  _usage.SevenDayPercent, stale, capFont, pctFont);
+        double? sessionExpected = _showExpectedRate ? ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
+        double? weeklyExpected  = _showExpectedRate ? ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
+        DrawUsageBar(g, top,                "Session", _usage.FiveHourPercent, sessionExpected, stale, capFont, pctFont);
+        DrawUsageBar(g, top + BarRowHeight, "Weekly",  _usage.SevenDayPercent, weeklyExpected,  stale, capFont, pctFont);
     }
 
     private void DrawUsageBar(Graphics g, int rowTop, string caption, double? percent,
-                              bool stale, Font capFont, Font pctFont)
+                              double? expectedPct, bool stale, Font capFont, Font pctFont)
     {
         const int CaptionW = 46;
         const int PctW     = 34;
@@ -880,10 +921,27 @@ internal sealed class OverlayForm : Form
             textColor = capColor;
         }
 
+        // Expected-rate marker: thin vertical bar at the elapsed-time position.
+        if (expectedPct is { } ep && trackW > 0)
+        {
+            int markerX = trackLeft + (int)Math.Round(trackW * ep / 100.0);
+            Color markerColor = Color.FromArgb(180, 180, 195);
+            if (stale) markerColor = Blend(markerColor, BgColor, 0.5f);
+            using var markerBrush = new SolidBrush(markerColor);
+            g.FillRectangle(markerBrush, markerX - 1, trackY - 1, 2, TrackH + 2);
+        }
+
         using var textBrush = new SolidBrush(textColor);
         var txtSz = g.MeasureString(pctText, pctFont);
         g.DrawString(pctText, pctFont, textBrush,
             ClientSize.Width - HorizPad - txtSz.Width, midY - txtSz.Height / 2);
+    }
+
+    private static double? ElapsedPercent(DateTime? resetsAt, TimeSpan window)
+    {
+        if (resetsAt is null) return null;
+        var elapsed = DateTime.Now - (resetsAt.Value - window);
+        return Math.Clamp(elapsed.TotalSeconds / window.TotalSeconds * 100.0, 0, 100);
     }
 
     // Colour thresholds: <50 green, 50–75 yellow, 75–90 orange, 90+ red.
@@ -909,6 +967,188 @@ internal sealed class OverlayForm : Form
         using var path = RoundedRect(new Rectangle(x, y, w, h), r);
         g.FillPath(brush, path);
     }
+
+    // ── Quick links row ───────────────────────────────────────────────────────
+    // Draws enabled quick-link icons side-by-side, centred horizontally.
+    // Quick-link indices: 0 = GitKraken, 1 = Slack.
+    private void DrawQuickLinksRow(Graphics g)
+    {
+        const int IconSize = 16;
+        const int IconGap  = 14;
+        const int HitPad   = 4;
+
+        int rowTop  = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+        int centerY = rowTop + QuickLinksRowHeight / 2;
+
+        // Build ordered list of enabled icons.
+        var slots = new List<(Bitmap? icon, string fallback, Color fallbackColor, int index)>();
+        if (_gitKrakenEnabled) slots.Add((_gitKrakenIcon, "GK", Color.FromArgb(16, 179, 105), 0));
+        if (_slackEnabled)     slots.Add((_slackIcon,     "Sl", Color.FromArgb(74, 21, 75),    1));
+
+        int totalW = slots.Count * IconSize + (slots.Count - 1) * IconGap;
+        int startX = (ClientSize.Width - totalW) / 2;
+
+        for (int i = 0; i < slots.Count; i++)
+        {
+            var (icon, fallback, fallbackColor, index) = slots[i];
+            int iconX = startX + i * (IconSize + IconGap);
+            int iconY = centerY - IconSize / 2;
+
+            if (_hoveredQuickLink == index)
+            {
+                using var hover = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
+                g.FillRectangle(hover,
+                    iconX - HitPad, iconY - HitPad,
+                    IconSize + HitPad * 2, IconSize + HitPad * 2);
+            }
+
+            if (icon != null)
+            {
+                g.DrawImage(icon, iconX, iconY, IconSize, IconSize);
+            }
+            else
+            {
+                using var font  = new Font("Segoe UI", 7f, FontStyle.Bold, GraphicsUnit.Point);
+                using var brush = new SolidBrush(fallbackColor);
+                var sz = g.MeasureString(fallback, font);
+                g.DrawString(fallback, font, brush,
+                    iconX + (IconSize - sz.Width) / 2, iconY + (IconSize - sz.Height) / 2);
+            }
+        }
+    }
+
+    // Returns the quick-link index (0=GitKraken, 1=Slack) under point p, or -1 if none.
+    private int HitTestQuickLink(Point p)
+    {
+        if (!HasQuickLinksRow) return -1;
+        int rowTop = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+        if (p.Y < rowTop || p.Y >= rowTop + QuickLinksRowHeight) return -1;
+
+        const int IconSize = 16;
+        const int IconGap  = 14;
+        const int HitPad   = 4;
+
+        var slots = new List<int>();
+        if (_gitKrakenEnabled) slots.Add(0);
+        if (_slackEnabled)     slots.Add(1);
+
+        int totalW = slots.Count * IconSize + (slots.Count - 1) * IconGap;
+        int startX = (ClientSize.Width - totalW) / 2;
+
+        for (int i = 0; i < slots.Count; i++)
+        {
+            int iconX = startX + i * (IconSize + IconGap);
+            if (p.X >= iconX - HitPad && p.X < iconX + IconSize + HitPad)
+                return slots[i];
+        }
+        return -1;
+    }
+
+    private static string? TryFindGitKrakenExe()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var standalone = Path.Combine(local, "Programs", "GitKraken", "gitkraken.exe");
+        if (File.Exists(standalone)) return standalone;
+
+        var squirrelDir = Path.Combine(local, "gitkraken");
+        if (Directory.Exists(squirrelDir))
+        {
+            foreach (var sub in Directory.GetDirectories(squirrelDir, "app-*")
+                                         .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                var exe = Path.Combine(sub, "gitkraken.exe");
+                if (File.Exists(exe)) return exe;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryFindSlackExe()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var standalone = Path.Combine(local, "Programs", "Slack", "slack.exe");
+        if (File.Exists(standalone)) return standalone;
+
+        var squirrelDir = Path.Combine(local, "slack");
+        if (Directory.Exists(squirrelDir))
+        {
+            foreach (var sub in Directory.GetDirectories(squirrelDir, "app-*")
+                                         .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                var exe = Path.Combine(sub, "slack.exe");
+                if (File.Exists(exe)) return exe;
+            }
+        }
+
+        return null;
+    }
+
+    private static Bitmap? LoadAndResizeEmbedded(string resourceName, int size)
+    {
+        try
+        {
+            using var stream = typeof(OverlayForm).Assembly.GetManifestResourceStream(resourceName);
+            if (stream == null) return null;
+            using var src = new Bitmap(stream);
+            var result = new Bitmap(size, size);
+            using var ig = Graphics.FromImage(result);
+            ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            ig.DrawImage(src, 0, 0, size, size);
+            return result;
+        }
+        catch { return null; }
+    }
+
+    private static Bitmap? LoadAppIcon(string? exePath, int size)
+    {
+        if (exePath == null) return null;
+        try
+        {
+            using var icon = Icon.ExtractAssociatedIcon(exePath);
+            if (icon == null) return null;
+            using var bmp  = icon.ToBitmap();
+            var result = new Bitmap(size, size);
+            using var ig = Graphics.FromImage(result);
+            ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            ig.DrawImage(bmp, 0, 0, size, size);
+            return result;
+        }
+        catch { return null; }
+    }
+
+    // Embedded PNGs take priority; fall back to extracting from the installed exe.
+    private static Bitmap? LoadGitKrakenIcon(int size) =>
+        LoadAndResizeEmbedded("ClaudeWatch.gitkraken.png", size)
+        ?? LoadAppIcon(TryFindGitKrakenExe(), size);
+
+    private static Bitmap? LoadSlackIcon(int size) =>
+        LoadAndResizeEmbedded("ClaudeWatch.slack.png", size)
+        ?? LoadAppIcon(TryFindSlackExe(), size);
+
+    private static void LaunchOrFocus(string processName, string? exePath)
+    {
+        try
+        {
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName(processName))
+            {
+                if (p.MainWindowHandle != IntPtr.Zero)
+                {
+                    NativeMethods.FocusWindow(p.MainWindowHandle);
+                    return;
+                }
+            }
+            if (exePath != null)
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(exePath) { UseShellExecute = true });
+        }
+        catch { }
+    }
+
+    private static void LaunchOrFocusGitKraken() => LaunchOrFocus("gitkraken", TryFindGitKrakenExe());
+    private static void LaunchOrFocusSlack()     => LaunchOrFocus("slack",     TryFindSlackExe());
 
     private void DrawRow(Graphics g, int rowIdx)
     {
@@ -1166,8 +1406,9 @@ internal sealed class OverlayForm : Form
                 Invalidate();
             }
 
-            // Dwell over the usage strip (only present when the full panel shows) pops a details/staleness tooltip.
-            bool inStrip = ShowFullPanel && _usageEnabled && e.Y >= HeaderHeight && e.Y < RowsTop;
+            // Dwell over the usage strip (only the two bar rows, not the GitKraken row below them).
+            int usageStripEnd = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+            bool inStrip = ShowFullPanel && _usageEnabled && e.Y >= HeaderHeight && e.Y < usageStripEnd;
             if (inStrip != _inUsageStrip)
             {
                 _inUsageStrip = inStrip;
@@ -1181,6 +1422,15 @@ internal sealed class OverlayForm : Form
                     _usageHoverTimer.Stop();
                     HideUsageTooltip();
                 }
+            }
+
+            // Quick-link icons row hover (per-icon hit test).
+            int hovered = ShowFullPanel ? HitTestQuickLink(e.Location) : -1;
+            if (hovered != _hoveredQuickLink)
+            {
+                _hoveredQuickLink = hovered;
+                Cursor = hovered >= 0 ? Cursors.Hand : Cursors.Default;
+                Invalidate();
             }
         }
 
@@ -1228,6 +1478,11 @@ internal sealed class OverlayForm : Form
                     if (int.TryParse(pid, out int pidInt))
                         NativeMethods.FocusTerminalForProcess(pidInt);
                 }
+                else if (HitTestQuickLink(e.Location) is var integ && integ >= 0)
+                {
+                    if (integ == 0) LaunchOrFocusGitKraken();
+                    else if (integ == 1) LaunchOrFocusSlack();
+                }
                 else if (!_dense && e.Y < HeaderHeight && _sessions.Count > 0)
                 {
                     // Header click toggles expand/collapse — floating mode only.
@@ -1259,6 +1514,7 @@ internal sealed class OverlayForm : Form
         _inUsageStrip = false;
         _usageHoverTimer.Stop();
         HideUsageTooltip();
+        if (_hoveredQuickLink >= 0) { _hoveredQuickLink = -1; Cursor = Cursors.Default; }
 
         // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
         // where the cursor legitimately roams to another monitor's drop lane.
@@ -1317,6 +1573,23 @@ internal sealed class OverlayForm : Form
         {
             var historySession = _rows[row].Session;
             items.Add(("View history", () => HistoryRequested?.Invoke(historySession.SessionId)));
+        }
+
+        if (row >= 0)
+        {
+            var idSession = _rows[row].Session;
+            items.Add(("Copy session ID", () => Clipboard.SetText(idSession.SessionId)));
+        }
+
+        if (row >= 0)
+        {
+            var txSession = _rows[row].Session;
+            items.Add(("Open transcript in VS Code", () =>
+            {
+                var path = TranscriptReader.FindTranscript(txSession.SessionId, txSession.Cwd);
+                if (path != null)
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("code", $"\"{path}\"") { UseShellExecute = true });
+            }));
         }
 
         if (row >= 0 && _rows[row].Session is { RemoteControlled: true } rc)

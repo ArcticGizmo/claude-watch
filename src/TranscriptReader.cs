@@ -62,6 +62,35 @@ internal sealed class TranscriptReader
         }
     }
 
+    /// <summary>Returns the full path to a session's .jsonl transcript, or null if not found.</summary>
+    public static string? FindTranscript(string sessionId, string cwd)
+    {
+        var projectsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "projects");
+
+        if (!string.IsNullOrEmpty(cwd))
+        {
+            var encoded = Regex.Replace(cwd, "[^A-Za-z0-9]", "-");
+            var direct = Path.Combine(projectsDir, encoded, sessionId + ".jsonl");
+            if (File.Exists(direct))
+                return direct;
+        }
+
+        try
+        {
+            foreach (var dir in Directory.EnumerateDirectories(projectsDir))
+            {
+                var candidate = Path.Combine(dir, sessionId + ".jsonl");
+                if (File.Exists(candidate))
+                    return candidate;
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
     private string? ResolveTranscript(string sessionId, string cwd)
     {
         // Claude Code encodes the cwd into the project dir name by replacing every

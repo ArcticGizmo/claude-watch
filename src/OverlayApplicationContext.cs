@@ -135,7 +135,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         _overlay.Show();
         _overlay.SetUsageEnabled(_settings.ShowUsage);
+        _overlay.SetShowExpectedRate(_settings.ShowExpectedUsageRate);
         _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
+        _overlay.SetGitKrakenEnabled(_settings.ShowGitKraken);
+        _overlay.SetSlackEnabled(_settings.ShowSlack);
         _monitor.Scan();
 
         if (_settings.ShowUsage)
@@ -187,10 +190,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         _settingsForm = new SettingsForm(_settings, _usageMonitor, _lastUsage);
         _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
+        _settingsForm.ExpectedRateChanged    += SetExpectedRateEnabled;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
         _settingsForm.TestNotificationRequested += ShowTestNotification;
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
         _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
+        _settingsForm.GitKrakenEnabledChanged += SetGitKrakenEnabled;
+        _settingsForm.SlackEnabledChanged     += SetSlackEnabled;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -240,6 +246,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         {
             _usageTimer.Stop();
         }
+    }
+
+    private void SetExpectedRateEnabled(bool enabled)
+    {
+        if (_settings.ShowExpectedUsageRate == enabled) return;
+        _settings.ShowExpectedUsageRate = enabled;
+        _settings.Save();
+        _overlay.SetShowExpectedRate(enabled);
     }
 
     // Fetches usage off the UI thread, then pushes the result back onto it for rendering in both
@@ -427,6 +441,20 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settings.ExternalNotificationsEnabled = enabled;
         _settings.Save();
         _overlay.SetExternalNotificationsAvailable(enabled);
+    }
+
+    private void SetGitKrakenEnabled(bool enabled)
+    {
+        _settings.ShowGitKraken = enabled;
+        _settings.Save();
+        _overlay.SetGitKrakenEnabled(enabled);
+    }
+
+    private void SetSlackEnabled(bool enabled)
+    {
+        _settings.ShowSlack = enabled;
+        _settings.Save();
+        _overlay.SetSlackEnabled(enabled);
     }
 
     // Pushes an external notification for a session, but only when the feature is on and that session
