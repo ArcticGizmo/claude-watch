@@ -1325,6 +1325,17 @@ internal sealed class OverlayForm : Form
             items.Add(("Copy session ID", () => Clipboard.SetText(idSession.SessionId)));
         }
 
+        if (row >= 0)
+        {
+            var txSession = _rows[row].Session;
+            items.Add(("Open transcript in VS Code", () =>
+            {
+                var path = TranscriptReader.FindTranscript(txSession.SessionId, txSession.Cwd);
+                if (path != null)
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("code", $"\"{path}\"") { UseShellExecute = true });
+            }));
+        }
+
         if (row >= 0 && _rows[row].Session is { RemoteControlled: true } rc)
             items.Add(("Show QR code", () => ShowQrCode(rc)));
 
