@@ -28,12 +28,26 @@ public enum PermissionMode
 /// <summary>
 /// A Claude Code sub-agent (Task tool) currently running under a parent session.
 /// Sub-agents have no session file of their own — they execute in the parent's
-/// process and are surfaced only via the parent's transcript (see SubAgentReader).
+/// process and are surfaced only via the parent's transcript (see SessionChildReader).
 /// </summary>
 public record SubAgent(
     string AgentId,      // tool_use id of the Task that launched it (stable per invocation)
     string Description,  // the Task's short description, used as the row label
     string AgentType     // subagent_type, e.g. "general-purpose", "Explore"
+);
+
+/// <summary>
+/// A background shell ("task") launched under a session via a Bash/PowerShell tool call with
+/// <c>run_in_background: true</c>. Like sub-agents these run inside the parent's process and have
+/// no session file; they are surfaced from the parent transcript (see SessionChildReader). Unlike
+/// sub-agents they do not block the parent loop — the parent returns immediately and may go idle
+/// while the shell keeps running (e.g. a dev server), so they are display-only and never change the
+/// parent's status or its "done" notification.
+/// </summary>
+public record BackgroundShell(
+    string ShellId,   // background ID from "running in background with ID: <id>", e.g. "bxo3wpb2a"
+    string Command,   // single-line command snippet, used as the row label
+    string Tool       // launching tool, "Bash" or "PowerShell"
 );
 
 public record ClaudeSession(
@@ -45,6 +59,7 @@ public record ClaudeSession(
     DateTime LastUpdated,
     PermissionMode Mode = PermissionMode.Normal,
     IReadOnlyList<SubAgent>? SubAgents = null,
+    IReadOnlyList<BackgroundShell>? Shells = null,
     string? Activity = null,
     DateTime? RunningSince = null,
     string? BridgeSessionId = null,
@@ -53,6 +68,9 @@ public record ClaudeSession(
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
     public IReadOnlyList<SubAgent> SubAgents { get; init; } = SubAgents ?? [];
+
+    /// <summary>Running background shells ("tasks") under this session; never null.</summary>
+    public IReadOnlyList<BackgroundShell> Shells { get; init; } = Shells ?? [];
 
     /// <summary>
     /// True while this session is connected to the mobile app / claude.ai via /remote-control —

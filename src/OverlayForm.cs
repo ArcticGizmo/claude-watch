@@ -57,6 +57,7 @@ internal sealed class OverlayForm : Form
     private static readonly Color SepColor       = Color.FromArgb(35,  35,  50);
     private static readonly Color RowHoverColor  = Color.FromArgb(25,  25,  38);
     private static readonly Color SubAgentColor  = Color.FromArgb(56,  189, 248);
+    private static readonly Color ShellColor     = Color.FromArgb(167, 139, 250);
     private static readonly Color RemoteColor    = Color.FromArgb(96,  165, 250);
     private static readonly Color MailColor      = Color.FromArgb(94,  234, 212);
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
@@ -64,11 +65,14 @@ internal sealed class OverlayForm : Form
     private static readonly Color UsageTrackColor= Color.FromArgb(38,  38,  52);
 
     // ── State ─────────────────────────────────────────────────────────────────
-    // A flat render list of parent-session rows interleaved with their running sub-agent
-    // child rows, in draw order. Built from the sessions on each update.
-    private readonly record struct DisplayRow(ClaudeSession Session, SubAgent? Sub)
+    // A flat render list of parent-session rows interleaved with their child rows (running
+    // sub-agents and background shells), in draw order. Built from the sessions on each update.
+    // A child is rendered uniformly from its label, a short status word, and a dot colour.
+    private readonly record struct ChildRow(string Label, string Status, Color Dot);
+
+    private readonly record struct DisplayRow(ClaudeSession Session, ChildRow? Child)
     {
-        public bool IsSubAgent => Sub != null;
+        public bool IsChild => Child != null;
     }
 
     private IReadOnlyList<ClaudeSession> _sessions = [];
@@ -233,7 +237,9 @@ internal sealed class OverlayForm : Form
         {
             rows.Add(new DisplayRow(session, null));
             foreach (var sub in session.SubAgents)
-                rows.Add(new DisplayRow(session, sub));
+                rows.Add(new DisplayRow(session, new ChildRow(sub.Description, "running", SubAgentColor)));
+            foreach (var shell in session.Shells)
+                rows.Add(new DisplayRow(session, new ChildRow(shell.Command, "shell", ShellColor)));
         }
         _rows = rows;
 
@@ -355,7 +361,7 @@ internal sealed class OverlayForm : Form
 
     // ── Layout ────────────────────────────────────────────────────────────────
     // Pixel height of a single render row (sub-agent rows are shorter than session rows).
-    private static int HeightOf(DisplayRow row) => row.IsSubAgent ? SubRowHeight : RowHeight;
+    private static int HeightOf(DisplayRow row) => row.IsChild ? SubRowHeight : RowHeight;
 
     // Y offset (from the top of the form) of the row at the given index.
     private int RowTop(int index)
@@ -912,15 +918,15 @@ internal sealed class OverlayForm : Form
 
     private void DrawRow(Graphics g, int rowIdx)
     {
-        if (_rows[rowIdx].IsSubAgent)
-            DrawSubAgentRow(g, rowIdx);
+        if (_rows[rowIdx].IsChild)
+            DrawChildRow(g, rowIdx);
         else
             DrawSessionRow(g, rowIdx);
     }
 
-    private void DrawSubAgentRow(Graphics g, int rowIdx)
+    private void DrawChildRow(Graphics g, int rowIdx)
     {
-        var sub  = _rows[rowIdx].Sub!;
+        var child = _rows[rowIdx].Child!.Value;
         int top  = RowTop(rowIdx);
         int midY = top + SubRowHeight / 2;
 
@@ -939,25 +945,24 @@ internal sealed class OverlayForm : Form
             g.DrawLine(treePen, branchX, midY, dotX - 2, midY);
         }
 
-        using var dotBrush = new SolidBrush(SubAgentColor);
+        using var dotBrush = new SolidBrush(child.Dot);
         g.FillEllipse(dotBrush, dotX, midY - 3, 6, 6);
 
         using var nameFont   = new Font("Segoe UI", 8f, GraphicsUnit.Point);
         using var statusFont = new Font("Segoe UI", 7f, GraphicsUnit.Point);
         using var fgBrush    = new SolidBrush(FgColor);
-        using var subBrush   = new SolidBrush(SubAgentColor);
+        using var subBrush   = new SolidBrush(child.Dot);
 
-        const string statusText = "running";
-        var statusSz   = g.MeasureString(statusText, statusFont);
+        var statusSz   = g.MeasureString(child.Status, statusFont);
         int labelX     = dotX + 12;
         int labelMaxW  = ClientSize.Width - labelX - HorizPad - (int)statusSz.Width - 6;
-        var labelTrunc = TruncateString(g, sub.Description, nameFont, labelMaxW);
+        var labelTrunc = TruncateString(g, child.Label, nameFont, labelMaxW);
         var labelSz    = g.MeasureString(labelTrunc, nameFont);
 
         g.DrawString(labelTrunc, nameFont, fgBrush, labelX, midY - labelSz.Height / 2);
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
-        g.DrawString(statusText, statusFont, subBrush, statusX, midY - statusSz.Height / 2);
+        g.DrawString(child.Status, statusFont, subBrush, statusX, midY - statusSz.Height / 2);
     }
 
     private void DrawSessionRow(Graphics g, int rowIdx)
@@ -1323,8 +1328,8 @@ internal sealed class OverlayForm : Form
             items.Add(("Show QR code", () => ShowQrCode(rc)));
 
         // Per-session external-notify toggle — only on a real session row, and only while the feature
-        // is switched on globally. Sub-agent rows share the parent session, so skip them.
-        if (row >= 0 && !_rows[row].IsSubAgent && _externalNotifyAvailable)
+        // is switched on globally. Child rows (sub-agents/shells) share the parent session, so skip them.
+        if (row >= 0 && !_rows[row].IsChild && _externalNotifyAvailable)
         {
             var s = _rows[row].Session;
             string label = ExternalNotifyEnabled(s)

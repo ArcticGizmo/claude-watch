@@ -23,7 +23,7 @@ internal sealed class SessionMonitor : IDisposable
     // moment they all finish and treat it like a busy->idle completion.
     private readonly HashSet<string> _hadRunningSubs = new();
 
-    private readonly SubAgentReader _subAgents = new();
+    private readonly SessionChildReader _children = new();
     private readonly TranscriptReader _transcripts = new();
 
     // PIDs we have an exit subscription for, keyed by the same string PID used everywhere else.
@@ -239,9 +239,13 @@ internal sealed class SessionMonitor : IDisposable
                     status = SessionStatus.Idle;
             }
 
-            // Sub-agents (Task tool) run inside this session's process and have no session file
-            // of their own; surface them from the transcript and roll their activity up.
-            var subAgents = _subAgents.GetRunning(sessionId, cwd);
+            // Sub-agents (Task tool) and background shells run inside this session's process and
+            // have no session file of their own; surface them from the transcript. Sub-agents block
+            // the parent loop (so they roll activity up, below); background shells do not, so they
+            // are attached for display only and never change the parent's status.
+            var children = _children.GetRunning(sessionId, cwd);
+            var subAgents = children.SubAgents;
+            var shells = children.Shells;
             bool hasRunningSubs = subAgents.Count > 0;
             bool hadRunningSubs = _hadRunningSubs.Contains(pid);
             bool subsJustFinished = hadRunningSubs && !hasRunningSubs;
@@ -314,6 +318,7 @@ internal sealed class SessionMonitor : IDisposable
                 updatedAt,
                 mode,
                 subAgents,
+                shells,
                 activity,
                 runningSince,
                 bridgeSessionId,
