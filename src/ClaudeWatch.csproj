@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Version>0.0.30</Version>
+    <Version>0.0.31</Version>
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -15,8 +15,6 @@
   <ItemGroup>
     <EmbeddedResource Include="icon.ico" />
     <EmbeddedResource Include="icon.png" />
-    <EmbeddedResource Include="..\logos\gitkraken.png" LogicalName="ClaudeWatch.gitkraken.png" />
-    <EmbeddedResource Include="..\logos\slack.png"     LogicalName="ClaudeWatch.slack.png" />
     <EmbeddedResource Include="..\CHANGELOG.md"        LogicalName="ClaudeWatch.CHANGELOG.md" />
   </ItemGroup>
   <ItemGroup>

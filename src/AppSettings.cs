@@ -1,6 +1,7 @@
 namespace ClaudeWatch;
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 internal sealed class AppSettings
 {
@@ -55,19 +56,53 @@ internal sealed class AppSettings
     public bool AutoStartOnFirstSession  { get; set; }
     public bool AutoCloseAfterLastSession { get; set; }
 
-    // Quick links. Icons displayed below the usage bars; each opens the app or focuses it.
-    public bool ShowGitKraken { get; set; }
-    public bool ShowSlack     { get; set; }
+    // Quick links. Icons displayed below the usage bars; each opens the app or focuses it. The list
+    // is the source of truth; null means "never configured" and triggers a one-time seed (see
+    // MigrateQuickLinks) with the well-known presets, honouring the legacy switches below. An empty
+    // (non-null) list means the user deliberately removed every link and is left alone.
+    public List<QuickLink>? QuickLinks { get; set; }
+
+    // Legacy quick-link switches (pre-configurable links). Kept only so an older settings file can be
+    // migrated into QuickLinks on load; nullable to tell "absent" from "false", and cleared once
+    // folded in so they're not re-written. See MigrateQuickLinks.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ShowGitKraken { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ShowSlack     { get; set; }
 
     public static AppSettings Load()
     {
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new();
+            {
+                var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new();
+                s.MigrateQuickLinks();
+                return s;
+            }
         }
         catch { }
-        return new();
+        var fresh = new AppSettings();
+        fresh.MigrateQuickLinks();
+        return fresh;
+    }
+
+    // Seeds QuickLinks the first time (null list), one entry per well-known preset. Each preset is
+    // enabled only if its legacy ShowGitKraken/ShowSlack switch was on, so an upgrade preserves the
+    // user's previous choice; a clean install gets both presets present-but-off. Presets are name-only
+    // (no pinned path): the icon and launch resolve through the Start Menu, so they show the real logo
+    // and survive app updates. The legacy switches are then dropped so they stop being persisted.
+    private void MigrateQuickLinks()
+    {
+        if (QuickLinks != null) return;
+
+        QuickLinks =
+        [
+            new QuickLink { Name = "GitKraken", Enabled = ShowGitKraken == true },
+            new QuickLink { Name = "Slack",     Enabled = ShowSlack     == true },
+        ];
+        ShowGitKraken = null;
+        ShowSlack     = null;
     }
 
     public void Save()

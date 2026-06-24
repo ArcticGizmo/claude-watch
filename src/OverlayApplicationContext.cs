@@ -137,8 +137,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.SetUsageEnabled(_settings.ShowUsage);
         _overlay.SetShowExpectedRate(_settings.ShowExpectedUsageRate);
         _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
-        _overlay.SetGitKrakenEnabled(_settings.ShowGitKraken);
-        _overlay.SetSlackEnabled(_settings.ShowSlack);
+        // Warm the (slow, one-off) Start Menu app lookup off the UI thread so the first quick-link
+        // icon load and the Add/Edit dialog don't stall on it.
+        System.Threading.Tasks.Task.Run(ShellIcon.WarmCache);
+        _overlay.SetQuickLinks(_settings.QuickLinks ?? []);
         _monitor.Scan();
 
         if (_settings.ShowUsage)
@@ -195,8 +197,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.TestNotificationRequested += ShowTestNotification;
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
         _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
-        _settingsForm.GitKrakenEnabledChanged += SetGitKrakenEnabled;
-        _settingsForm.SlackEnabledChanged     += SetSlackEnabled;
+        _settingsForm.QuickLinksChanged       += SetQuickLinks;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -443,18 +444,11 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.SetExternalNotificationsAvailable(enabled);
     }
 
-    private void SetGitKrakenEnabled(bool enabled)
+    private void SetQuickLinks(IReadOnlyList<QuickLink> links)
     {
-        _settings.ShowGitKraken = enabled;
+        _settings.QuickLinks = links.Select(l => l.Clone()).ToList();
         _settings.Save();
-        _overlay.SetGitKrakenEnabled(enabled);
-    }
-
-    private void SetSlackEnabled(bool enabled)
-    {
-        _settings.ShowSlack = enabled;
-        _settings.Save();
-        _overlay.SetSlackEnabled(enabled);
+        _overlay.SetQuickLinks(links);
     }
 
     // Pushes an external notification for a session, but only when the feature is on and that session

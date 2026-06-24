@@ -7,9 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-_(nothing — unless you count this very changelog)_
-
 ---
+
+## [v0.0.31] - 2026-06-24
+
+- Configurable Quick Links — shortcut to any app, not just GitKraken and Slack (existing settings carry over)
+- Quick-link icons now pulled from the app itself, so Store apps like Slack show their real logo
+- Quick-link editor previews the app it found as you type
+- Snappier overlay (apps and icons are now cached)
+
+## [v0.0.30] - 2026-06-23
+
+- Added this changelog (the one you are reading)
+- View the changelog in-app, no leaving required
 
 ## [v0.0.29] - 2026-06-23
 
