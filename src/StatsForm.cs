@@ -3,24 +3,28 @@ using System.Drawing.Drawing2D;
 namespace ClaudeWatch;
 
 /// <summary>
-/// A dedicated window showing today's session statistics: the headline figures (sessions, active
-/// time, prompts, tool calls), token totals with an equivalent API cost, an hourly activity histogram,
-/// and per-project / tool-mix / model breakdowns. All figures come from <see cref="SessionStatsService"/>,
-/// which derives them from the transcripts on disk — so the view is retroactive and needs nothing
-/// recorded ahead of time.
+/// A dedicated window showing Claude Code session statistics. A scope switch across the top selects
+/// Today / Last 7 days / Last 30 days / All time; each view shows the headline figures (sessions,
+/// active time, prompts, tool calls), token totals with an equivalent API cost, an hourly activity
+/// histogram, and per-project / tool-mix / model / branch breakdowns. The range views add a daily
+/// activity trend and streak/record extras. All figures come from <see cref="SessionStatsService"/>,
+/// which derives them from the transcripts on disk — so the view is retroactive.
 ///
 /// The dashboard is owner-drawn onto a scrollable panel: a single <see cref="DrawDashboard"/> routine
-/// both measures (Graphics null) and paints, so layout never drifts between the two passes. The report
-/// is computed off the UI thread, mirroring <see cref="HistoryViewerForm"/>'s loading pattern. Standard
-/// resizable chrome with a dark title bar; a single reused instance owned by the application context.
+/// both measures (Graphics null) and paints, so layout never drifts between the two passes. Reports are
+/// computed off the UI thread, mirroring <see cref="HistoryViewerForm"/>'s loading pattern.
 /// </summary>
 internal sealed class StatsForm : Form
 {
     private static readonly Color BodyBg = Color.FromArgb(18, 18, 24);
     private static readonly Color CardBg = Color.FromArgb(30, 30, 42);
 
+    private enum Scope { Today, Week, Month, AllTime }
+
+    private readonly Panel _toolbar;
     private readonly Panel _scroll;
     private readonly ContentPanel _content;
+    private readonly Dictionary<Scope, Button> _scopeButtons = new();
 
     private readonly Font _bigFont    = new("Segoe UI Semibold", 21f, FontStyle.Regular, GraphicsUnit.Point);
     private readonly Font _h1Font     = new("Segoe UI", 15f, FontStyle.Bold, GraphicsUnit.Point);
@@ -29,7 +33,9 @@ internal sealed class StatsForm : Form
     private readonly Font _labelFont  = new("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
 
-    private StatsReport? _report;
+    private Scope _scope = Scope.Today;
+    private StatsReport? _report;       // the totals to render
+    private RangeReport? _range;        // non-null for the range scopes (adds trend + records)
     private bool _loading = true;
 
     public StatsForm()
@@ -38,14 +44,14 @@ internal sealed class StatsForm : Form
         BackColor     = BodyBg;
         ForeColor     = Theme.Fg;
         StartPosition = FormStartPosition.Manual;
-        MinimumSize   = new Size(520, 480);
+        MinimumSize   = new Size(560, 520);
         DoubleBuffered = true;
         if (_icon != null)
             Icon = Icon.FromHandle(_icon.GetHicon());
 
         var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
-        int w = Math.Max(MinimumSize.Width, (int)(wa.Width * 0.34));
-        int h = Math.Max(MinimumSize.Height, (int)(wa.Height * 0.78));
+        int w = Math.Max(MinimumSize.Width, (int)(wa.Width * 0.36));
+        int h = Math.Max(MinimumSize.Height, (int)(wa.Height * 0.8));
         Size = new Size(w, h);
         Location = new Point(wa.X + (wa.Width - Width) / 2, wa.Y + (wa.Height - Height) / 2);
 
@@ -53,7 +59,15 @@ internal sealed class StatsForm : Form
         _scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = BodyBg };
         _scroll.Controls.Add(_content);
         _scroll.Resize += (_, _) => Relayout();
-        Controls.Add(_scroll);
+        Controls.Add(_scroll);                       // fill added first, toolbar docks above it
+
+        _toolbar = new Panel { Dock = DockStyle.Top, Height = 46, BackColor = Theme.FormBg };
+        AddScopeButton("Today", Scope.Today);
+        AddScopeButton("7 days", Scope.Week);
+        AddScopeButton("30 days", Scope.Month);
+        AddScopeButton("All time", Scope.AllTime);
+        _toolbar.Resize += (_, _) => LayoutToolbar();
+        Controls.Add(_toolbar);
 
         KeyPreview = true;
     }
@@ -68,27 +82,61 @@ internal sealed class StatsForm : Form
     {
         base.OnShown(e);
         NativeMethods.UseDarkScrollBars(_scroll.Handle);
+        LayoutToolbar();
         RefreshStats();   // kick the first load
     }
 
-    /// <summary>Recomputes today's report off the UI thread, then repaints. Safe to call repeatedly
-    /// (e.g. each time the window is re-opened).</summary>
+    /// <summary>Recomputes the current scope's report off the UI thread, then repaints. Safe to call
+    /// repeatedly (e.g. each time the window is re-opened, or when the scope changes).</summary>
     public void RefreshStats()
     {
         _loading = true;
+        UpdateScopeButtons();
         Relayout();
+
         var today = DateOnly.FromDateTime(DateTime.Now);
-        Task.Run(() => SessionStatsService.ReportForDay(today)).ContinueWith(t =>
+        var scope = _scope;
+        Task.Run(() => LoadScope(scope, today)).ContinueWith(t =>
         {
-            var report = t.IsCompletedSuccessfully ? t.Result : StatsReport.Empty(today);
+            var (report, range) = t.IsCompletedSuccessfully ? t.Result : (StatsReport.Empty(today), (RangeReport?)null);
             try
             {
                 if (IsHandleCreated && !IsDisposed)
-                    BeginInvoke((Action)(() => { _report = report; _loading = false; Relayout(); }));
+                    BeginInvoke((Action)(() =>
+                    {
+                        _report = report;
+                        _range = range;
+                        _loading = false;
+                        Relayout();
+                    }));
             }
             catch (ObjectDisposedException) { }
             catch (InvalidOperationException) { }
         });
+    }
+
+    private static (StatsReport report, RangeReport? range) LoadScope(Scope scope, DateOnly today)
+    {
+        switch (scope)
+        {
+            case Scope.Week:
+            {
+                var r = SessionStatsService.ReportForRange(today.AddDays(-6), today, "Last 7 days");
+                return (r.Totals, r);
+            }
+            case Scope.Month:
+            {
+                var r = SessionStatsService.ReportForRange(today.AddDays(-29), today, "Last 30 days");
+                return (r.Totals, r);
+            }
+            case Scope.AllTime:
+            {
+                var r = SessionStatsService.ReportAllTime(today);
+                return (r.Totals, r);
+            }
+            default:
+                return (SessionStatsService.ReportForDay(today), null);
+        }
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -97,9 +145,50 @@ internal sealed class StatsForm : Form
         base.OnKeyDown(e);
     }
 
+    // ── Scope toolbar ──────────────────────────────────────────────────────────────
+    private void AddScopeButton(string text, Scope scope)
+    {
+        var b = new Button
+        {
+            Text = text,
+            Height = 28,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point),
+            TabStop = false,
+            UseVisualStyleBackColor = false,
+            AutoSize = false,
+            Width = 78,
+        };
+        b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
+        b.Click += (_, _) => { if (_scope != scope) { _scope = scope; RefreshStats(); } };
+        _scopeButtons[scope] = b;
+        _toolbar.Controls.Add(b);
+    }
+
+    private void LayoutToolbar()
+    {
+        const int pad = 12, gap = 6;
+        int x = pad, y = (_toolbar.Height - 28) / 2;
+        foreach (Scope s in new[] { Scope.Today, Scope.Week, Scope.Month, Scope.AllTime })
+        {
+            var b = _scopeButtons[s];
+            b.SetBounds(x, y, b.Width, 28);
+            x += b.Width + gap;
+        }
+    }
+
+    private void UpdateScopeButtons()
+    {
+        foreach (var (scope, b) in _scopeButtons)
+        {
+            bool on = scope == _scope;
+            b.BackColor = on ? Theme.Accent : Theme.ButtonBg;
+            b.ForeColor = on ? Color.FromArgb(18, 18, 24) : Theme.Fg;
+            b.FlatAppearance.BorderColor = on ? Theme.Accent : Theme.Border;
+        }
+    }
+
     // ── Layout ───────────────────────────────────────────────────────────────────
-    // Measure with the viewport width; if the content is taller than the viewport a vertical scrollbar
-    // will appear and steal width, so re-measure once at the narrower width before committing the size.
     private void Relayout()
     {
         if (!IsHandleCreated) return;
@@ -132,11 +221,12 @@ internal sealed class StatsForm : Form
         int x = Pad;
         int innerW = width - Pad * 2;
 
-        // Title
-        Draw(g, "Today", _h1Font, Theme.Title, x, y);
-        if (_report is { } rpt0)
-            Draw(g, rpt0.Day.ToDateTime(TimeOnly.MinValue).ToString("dddd, MMM d"), _bodyFont, Theme.Muted,
-                x + 4, y + 28);
+        // Title + subtitle
+        string title = _range?.ScopeLabel ?? "Today";
+        Draw(g, title, _h1Font, Theme.Title, x, y);
+        var subtitle = Subtitle();
+        if (subtitle.Length > 0)
+            Draw(g, subtitle, _bodyFont, Theme.Muted, x + 4, y + 28);
         y += 58;
 
         if (_loading)
@@ -149,8 +239,25 @@ internal sealed class StatsForm : Form
 
         if (report.SessionCount == 0)
         {
-            Draw(g, "No sessions recorded today yet.", _bodyFont, Theme.Muted, x, y);
+            Draw(g, "No sessions recorded in this range yet.", _bodyFont, Theme.Muted, x, y);
             return y + 40;
+        }
+
+        // Streak / records line (range scopes only)
+        if (_range is { } rng)
+        {
+            if (rng.StreakDays is { } streak && streak > 0)
+            {
+                Draw(g, $"{streak}-day streak", _h2Font, Theme.Accent, x, y);
+                y += 24;
+            }
+            var bits = new List<string> { $"{rng.ActiveDays} active {(rng.ActiveDays == 1 ? "day" : "days")}" };
+            if (rng.BusiestDay is { } bd)
+                bits.Add($"busiest {bd:MMM d} ({StatsFormat.Duration(rng.BusiestDayActive)})");
+            if (rng.LongestSession > TimeSpan.Zero)
+                bits.Add($"longest session {StatsFormat.Duration(rng.LongestSession)}");
+            Draw(g, string.Join("  ·  ", bits), _bodyFont, Theme.Muted, x, y);
+            y += 28;
         }
 
         // ── Headline stat cards ──
@@ -181,6 +288,10 @@ internal sealed class StatsForm : Form
             y += 22;
         }
 
+        // ── Daily trend (range scopes only) ──
+        if (_range is { } rng2 && rng2.Trend.Count > 1)
+            y = TrendHistogram(g, rng2.Trend, rng2.TrendLabel, x, y, innerW);
+
         // ── Tokens & cost ──
         y = SectionHeader(g, "Tokens & cost", x, y, innerW);
         var tk = report.Tokens;
@@ -202,16 +313,11 @@ internal sealed class StatsForm : Form
 
         // ── Per-project ──
         if (report.Projects.Count > 0)
-        {
-            y = SectionHeader(g, "By project", x, y, innerW);
-            long maxActive = Math.Max(1, report.Projects.Max(p => (long)p.ActiveTime.TotalSeconds));
-            foreach (var p in report.Projects.Take(8))
-            {
-                string right = $"{StatsFormat.Duration(p.ActiveTime)} · {StatsFormat.Tokens(p.Tokens)}";
-                y = BarRow(g, p.Project, right, (long)p.ActiveTime.TotalSeconds, maxActive, x, y, innerW, Theme.Accent);
-            }
-            y += 8;
-        }
+            y = GroupSection(g, "By project", report.Projects, 8, x, y, innerW, Theme.Accent);
+
+        // ── Per-branch (only worth showing when more than one branch appears) ──
+        if (report.Branches.Count > 1)
+            y = GroupSection(g, "By branch", report.Branches, 8, x, y, innerW, Color.FromArgb(167, 139, 250));
 
         // ── Tool mix ──
         if (report.Tools.Count > 0)
@@ -239,6 +345,31 @@ internal sealed class StatsForm : Form
         }
 
         return y + Pad;
+    }
+
+    private string Subtitle()
+    {
+        if (_range is not { } r)
+            return DateTime.Now.ToString("dddd, MMM d");
+        if (_scope == Scope.AllTime)
+            return r.FirstActiveDay is { } first ? $"since {first:MMM yyyy}" : "";
+        if (r.Trend.Count > 0)
+            return $"{r.Trend[0].Day:MMM d} – {r.Trend[^1].Day:MMM d}";
+        return "";
+    }
+
+    // A labelled group section (project / branch): one bar per entry with active time + token count.
+    private int GroupSection(Graphics? g, string title, IReadOnlyList<ProjectStat> items, int take,
+        int x, int y, int innerW, Color color)
+    {
+        y = SectionHeader(g, title, x, y, innerW);
+        long maxActive = Math.Max(1, items.Max(p => (long)p.ActiveTime.TotalSeconds));
+        foreach (var p in items.Take(take))
+        {
+            string right = $"{StatsFormat.Duration(p.ActiveTime)} · {StatsFormat.Tokens(p.Tokens)}";
+            y = BarRow(g, p.Project, right, (long)p.ActiveTime.TotalSeconds, maxActive, x, y, innerW, color);
+        }
+        return y + 8;
     }
 
     // ── Drawing helpers (all no-op when g is null, but advance the caller's y identically) ──
@@ -283,8 +414,7 @@ internal sealed class StatsForm : Form
             if (barW > 4)
                 FillRound(g, new Rectangle(x, y + 3, barW, rowH - 8), 5, color);
 
-            // Label and value drawn over the bar, with a subtle shadow-free contrast colour.
-            TextRenderer.DrawText(g, label, _bodyFont, new Rectangle(x + 8, y, innerW - 90, rowH), Theme.Title,
+            TextRenderer.DrawText(g, label, _bodyFont, new Rectangle(x + 8, y, innerW - 100, rowH), Theme.Title,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
             TextRenderer.DrawText(g, right, _bodyFont, new Rectangle(x, y, innerW - 8, rowH), Theme.Title,
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
@@ -309,12 +439,42 @@ internal sealed class StatsForm : Form
                 if (bh > 0)
                     FillRound(g, new Rectangle(bx, y + (areaH - bh), bw, bh), 2, Theme.Accent);
             }
-            // Baseline + a few hour ticks.
             using var pen = new Pen(Theme.Border);
             g.DrawLine(pen, x, y + areaH + 1, x + innerW, y + areaH + 1);
             foreach (int hr in new[] { 0, 6, 12, 18 })
                 TextRenderer.DrawText(g, $"{hr:00}", _labelFont, new Point(x + (int)(hr * cellW), y + areaH + 4),
                     Theme.Muted, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+        }
+        return y + areaH + 24;
+    }
+
+    // Daily activity bars across the range (one bar per day, oldest → newest), with the first/last
+    // date labelled under the baseline.
+    private int TrendHistogram(Graphics? g, IReadOnlyList<DayPoint> trend, string label, int x, int y, int innerW)
+    {
+        y = SectionHeader(g, label, x, y, innerW);
+        const int areaH = 56;
+        long max = Math.Max(1, trend.Max(p => (long)p.Active.TotalSeconds));
+        double cellW = innerW / (double)trend.Count;
+        if (g != null)
+        {
+            for (int i = 0; i < trend.Count; i++)
+            {
+                int sec = (int)trend[i].Active.TotalSeconds;
+                int bx = x + (int)(i * cellW);
+                int bw = Math.Max(2, (int)cellW - 2);
+                int bh = (int)(areaH * (sec / (double)max));
+                if (bh < 2 && sec > 0) bh = 2;
+                if (bh > 0)
+                    FillRound(g, new Rectangle(bx, y + (areaH - bh), bw, bh), 2, Theme.Accent);
+            }
+            using var pen = new Pen(Theme.Border);
+            g.DrawLine(pen, x, y + areaH + 1, x + innerW, y + areaH + 1);
+            TextRenderer.DrawText(g, $"{trend[0].Day:MMM d}", _labelFont, new Point(x, y + areaH + 4),
+                Theme.Muted, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            TextRenderer.DrawText(g, $"{trend[^1].Day:MMM d}", _labelFont,
+                new Rectangle(x, y + areaH + 4, innerW, 16), Theme.Muted,
+                TextFormatFlags.Right | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
         return y + areaH + 24;
     }
@@ -354,6 +514,7 @@ internal sealed class StatsForm : Form
     {
         if (disposing)
         {
+            foreach (var b in _scopeButtons.Values) b.Font.Dispose();
             _bigFont.Dispose();
             _h1Font.Dispose();
             _h2Font.Dispose();
