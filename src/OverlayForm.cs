@@ -241,7 +241,7 @@ internal sealed class OverlayForm : Form
         _sessions = sessions;
 
         var rows = new List<DisplayRow>();
-        foreach (var session in sessions.OrderBy(s => s.ProjectName, StringComparer.OrdinalIgnoreCase))
+        foreach (var session in sessions.OrderBy(s => s.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             rows.Add(new DisplayRow(session, null));
             foreach (var sub in session.SubAgents)
@@ -1281,7 +1281,7 @@ internal sealed class OverlayForm : Form
         int rcWidth      = session.RemoteControlled ? RcIconWidth : 0;
         var statusSz     = g.MeasureString(statusText, statusFont);
         int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth;
-        var nameTrunc    = TruncateString(g, session.ProjectName, nameFont, nameMaxWidth);
+        var nameTrunc    = TruncateString(g, session.DisplayName, nameFont, nameMaxWidth);
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
         // Glyphs sit just right of the status dot and push the name across: the mail glyph first
@@ -1644,7 +1644,7 @@ internal sealed class OverlayForm : Form
 
         _qrForm?.Close();
         var url = $"https://claude.ai/code/{session.BridgeSessionId}";
-        _qrForm = new QrCodeForm(session.ProjectName, url);
+        _qrForm = new QrCodeForm(session.DisplayName, url);
         _qrForm.FormClosed += (_, _) => _qrForm = null;
         _qrForm.CenterOn(Screen.FromControl(this));
         _qrForm.Show();

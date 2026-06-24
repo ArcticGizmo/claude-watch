@@ -48,11 +48,28 @@ public record ClaudeSession(
     string? Activity = null,
     DateTime? RunningSince = null,
     string? BridgeSessionId = null,
-    bool ExternalNotify = false
+    bool ExternalNotify = false,
+    string? Title = null
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
     public IReadOnlyList<SubAgent> SubAgents { get; init; } = SubAgents ?? [];
+
+    /// <summary>
+    /// The explicit session name set by Claude Code's built-in <c>/rename</c> command (a
+    /// <c>custom-title</c> transcript record). Null when the session was never renamed. The
+    /// auto-generated <c>ai-title</c> is deliberately ignored. Normalised so blank is null.
+    /// See <see cref="TranscriptReader.GetTitle"/>.
+    /// </summary>
+    public string? Title { get; init; } = string.IsNullOrWhiteSpace(Title) ? null : Title.Trim();
+
+    /// <summary>
+    /// The label to show the user for this session: the explicit <c>/rename</c> <see cref="Title"/>
+    /// when one has been set, otherwise the <see cref="ProjectName"/> derived from the working
+    /// directory (or, lacking that, the session id prefix). Internal logic that must match the real
+    /// terminal window — e.g. focusing it by title — should keep using <see cref="ProjectName"/>.
+    /// </summary>
+    public string DisplayName => Title ?? ProjectName;
 
     /// <summary>
     /// True while this session is connected to the mobile app / claude.ai via /remote-control —

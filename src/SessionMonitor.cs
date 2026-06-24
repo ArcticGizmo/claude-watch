@@ -282,6 +282,11 @@ internal sealed class SessionMonitor : IDisposable
             var externalNotify = !string.IsNullOrEmpty(sessionId)
                 && File.Exists(Path.Combine(_sessionsDir, $"{sessionId}.notify"));
 
+            // The explicit name set by Claude Code's built-in /rename command (a custom-title record
+            // in the transcript). Null when the session was never renamed, in which case the overlay
+            // falls back to the project name from cwd. The auto-generated ai-title is ignored.
+            var title = _transcripts.GetTitle(sessionId, cwd);
+
             // Track the start of the current continuous Running stretch so the overlay can show
             // elapsed run time; reset the moment the session stops running.
             DateTime? runningSince;
@@ -317,7 +322,8 @@ internal sealed class SessionMonitor : IDisposable
                 activity,
                 runningSince,
                 bridgeSessionId,
-                externalNotify
+                externalNotify,
+                title
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))

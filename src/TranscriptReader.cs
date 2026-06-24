@@ -26,6 +26,7 @@ internal sealed class TranscriptReader
     );
 
     private readonly Dictionary<string, CacheEntry> _cache = new();
+    private readonly Dictionary<string, CacheEntry> _titleCache = new();
 
     private readonly record struct CacheEntry(long Length, DateTime WriteUtc, string? Result);
 
@@ -54,6 +55,43 @@ internal sealed class TranscriptReader
 
             var result = Parse(path);
             _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
+            return result;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Returns the session's explicit name as set by Claude Code's built-in <c>/rename</c> command —
+    /// a <c>custom-title</c> transcript record. Null when the transcript can't be located/read or was
+    /// never renamed. The auto-generated <c>ai-title</c> is deliberately ignored.
+    ///
+    /// A <c>/rename</c> title may have been set once early on, so — like Claude Code itself — we look
+    /// in the tail first (where a later rename lands) and fall back to the head.
+    /// </summary>
+    public string? GetTitle(string sessionId, string cwd)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+            return null;
+
+        var path = ResolveTranscript(sessionId, cwd);
+        if (path == null)
+            return null;
+
+        try
+        {
+            var fi = new FileInfo(path);
+            if (
+                _titleCache.TryGetValue(path, out var cached)
+                && cached.Length == fi.Length
+                && cached.WriteUtc == fi.LastWriteTimeUtc
+            )
+                return cached.Result;
+
+            var result = ParseTitle(path);
+            _titleCache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
             return result;
         }
         catch
@@ -165,5 +203,50 @@ internal sealed class TranscriptReader
         }
 
         return latest;
+    }
+
+    private static string? ParseTitle(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+        // Scan the tail first — a later /rename lands here. If none and the file spans more than one
+        // window, a title set once early may be in the head, so look there before giving up.
+        return ScanWindow(fs, Math.Max(0, fs.Length - TailBytes))
+            ?? (fs.Length > TailBytes ? ScanWindow(fs, 0) : null);
+    }
+
+    // Scans a window of the transcript from <paramref name="start"/> and returns the last
+    // custom-title (the /rename name) record it contains, or null.
+    private static string? ScanWindow(FileStream fs, long start)
+    {
+        fs.Seek(start, SeekOrigin.Begin);
+        using var reader = new StreamReader(fs, leaveOpen: true);
+
+        // A non-zero start almost certainly lands mid-record; drop the partial first line.
+        if (start > 0)
+            reader.ReadLine();
+
+        string? custom = null;
+
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            // Cheap pre-filter: the /rename record type is "custom-title".
+            if (!line.Contains("custom-title"))
+                continue;
+
+            try
+            {
+                var node = JsonNode.Parse(line);
+                if (node?["type"]?.GetValue<string>() == "custom-title")
+                    custom = node["customTitle"]?.GetValue<string>() ?? custom;
+            }
+            catch
+            {
+                // Malformed/partial line — skip it.
+            }
+        }
+
+        return custom;
     }
 }

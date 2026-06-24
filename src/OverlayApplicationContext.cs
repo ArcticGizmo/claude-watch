@@ -450,7 +450,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.TriggerAttention();
 
         if (_settings.NotificationsEnabled && _settings.NotifyOnDone)
-            ShowSessionBalloon(NotificationKind.Done, session.ProjectName, session.Pid);
+            ShowSessionBalloon(NotificationKind.Done, session.DisplayName, session.Pid);
 
         if (_settings.NotificationsEnabled && _settings.ChimeOnDone)
             PlayChime(NotificationKind.Done);
@@ -463,7 +463,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.TriggerAttention();
 
         if (_settings.NotificationsEnabled && _settings.NotifyOnWaitingInput)
-            ShowSessionBalloon(NotificationKind.WaitingForInput, session.ProjectName, session.Pid);
+            ShowSessionBalloon(NotificationKind.WaitingForInput, session.DisplayName, session.Pid);
 
         if (_settings.NotificationsEnabled && _settings.ChimeOnWaitingInput)
             PlayChime(NotificationKind.WaitingForInput);
@@ -563,8 +563,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             return;
 
         var (title, body, tags) = kind == NotificationKind.Done
-            ? ("Claude Code — Done", $"Waiting for you in {session.ProjectName}", "white_check_mark")
-            : ("Claude Code — Waiting for Input", $"{session.ProjectName} needs your response", "bell");
+            ? ("Claude Code — Done", $"Waiting for you in {session.DisplayName}", "white_check_mark")
+            : ("Claude Code — Waiting for Input", $"{session.DisplayName} needs your response", "bell");
 
         var host = _settings.NtfyHost;
         var topic = _settings.NtfyTopic;
