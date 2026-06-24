@@ -110,12 +110,15 @@ internal sealed class OverlayForm : Form
     private bool _inUsageStrip;
     private readonly UsageTooltipForm _usageTooltip = new();
 
-    private bool _gitKrakenEnabled;
-    private bool _slackEnabled;
-    // -1 = none hovered, 0 = GitKraken, 1 = Slack
+    // Enabled quick links and their pre-rendered icons, index-aligned. Both are pushed in from the
+    // owning context via SetQuickLinks, which is the source of truth; icons are loaded once per
+    // update (an exe-extracted or embedded bitmap, or null to fall back to drawn initials).
+    private IReadOnlyList<QuickLink> _quickLinks = [];
+    private List<Bitmap?> _quickLinkIcons = [];
+    // -1 = none hovered, otherwise an index into _quickLinks.
     private int  _hoveredQuickLink = -1;
 
-    private bool HasQuickLinksRow => _gitKrakenEnabled || _slackEnabled;
+    private bool HasQuickLinksRow => _quickLinks.Count > 0;
 
     // Top of the session rows when expanded: header, plus the usage strip and optional quick-links row.
     private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (HasQuickLinksRow ? QuickLinksRowHeight : 0);
@@ -137,9 +140,6 @@ internal sealed class OverlayForm : Form
 
     // The claude-watch icon, shown atop the dense strip purely for flair. Null if unavailable.
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
-    // Quick-link icons, loaded from embedded resources (with exe-extraction fallback). Null if unavailable.
-    private readonly Bitmap? _gitKrakenIcon = LoadGitKrakenIcon(18);
-    private readonly Bitmap? _slackIcon     = LoadSlackIcon(18);
 
     // Is the full session body (usage bars + rows) currently on screen? In floating mode that's
     // the expanded state; in dense mode it's the hover-opened popup.
@@ -297,18 +297,18 @@ internal sealed class OverlayForm : Form
         Invalidate();
     }
 
-    public void SetGitKrakenEnabled(bool enabled)
+    // Replaces the quick-links strip with the enabled subset of the given links, (re)loading their
+    // icons. Called on startup and whenever the user edits the list in Settings.
+    public void SetQuickLinks(IReadOnlyList<QuickLink> links)
     {
-        if (_gitKrakenEnabled == enabled) return;
-        _gitKrakenEnabled = enabled;
-        RelayoutWindow();
-        Invalidate();
-    }
+        var enabled = links.Where(l => l.Enabled).ToList();
 
-    public void SetSlackEnabled(bool enabled)
-    {
-        if (_slackEnabled == enabled) return;
-        _slackEnabled = enabled;
+        foreach (var bmp in _quickLinkIcons)
+            bmp?.Dispose();
+        _quickLinkIcons = enabled.Select(l => LoadQuickLinkIcon(l, 18)).ToList();
+        _quickLinks     = enabled;
+        _hoveredQuickLink = -1;
+
         RelayoutWindow();
         Invalidate();
     }
@@ -969,8 +969,8 @@ internal sealed class OverlayForm : Form
     }
 
     // ── Quick links row ───────────────────────────────────────────────────────
-    // Draws enabled quick-link icons side-by-side, centred horizontally.
-    // Quick-link indices: 0 = GitKraken, 1 = Slack.
+    // Draws the enabled quick-link icons side-by-side, centred horizontally. Each slot shows its
+    // pre-loaded icon, or drawn initials over a name-derived colour when no icon is available.
     private void DrawQuickLinksRow(Graphics g)
     {
         const int IconSize = 16;
@@ -980,21 +980,16 @@ internal sealed class OverlayForm : Form
         int rowTop  = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
         int centerY = rowTop + QuickLinksRowHeight / 2;
 
-        // Build ordered list of enabled icons.
-        var slots = new List<(Bitmap? icon, string fallback, Color fallbackColor, int index)>();
-        if (_gitKrakenEnabled) slots.Add((_gitKrakenIcon, "GK", Color.FromArgb(16, 179, 105), 0));
-        if (_slackEnabled)     slots.Add((_slackIcon,     "Sl", Color.FromArgb(74, 21, 75),    1));
-
-        int totalW = slots.Count * IconSize + (slots.Count - 1) * IconGap;
+        int count  = _quickLinks.Count;
+        int totalW = count * IconSize + (count - 1) * IconGap;
         int startX = (ClientSize.Width - totalW) / 2;
 
-        for (int i = 0; i < slots.Count; i++)
+        for (int i = 0; i < count; i++)
         {
-            var (icon, fallback, fallbackColor, index) = slots[i];
             int iconX = startX + i * (IconSize + IconGap);
             int iconY = centerY - IconSize / 2;
 
-            if (_hoveredQuickLink == index)
+            if (_hoveredQuickLink == i)
             {
                 using var hover = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
                 g.FillRectangle(hover,
@@ -1002,6 +997,7 @@ internal sealed class OverlayForm : Form
                     IconSize + HitPad * 2, IconSize + HitPad * 2);
             }
 
+            var icon = i < _quickLinkIcons.Count ? _quickLinkIcons[i] : null;
             if (icon != null)
             {
                 g.DrawImage(icon, iconX, iconY, IconSize, IconSize);
@@ -1009,15 +1005,16 @@ internal sealed class OverlayForm : Form
             else
             {
                 using var font  = new Font("Segoe UI", 7f, FontStyle.Bold, GraphicsUnit.Point);
-                using var brush = new SolidBrush(fallbackColor);
-                var sz = g.MeasureString(fallback, font);
-                g.DrawString(fallback, font, brush,
+                using var brush = new SolidBrush(FallbackColor(_quickLinks[i].Name));
+                var initials = Initials(_quickLinks[i].Name);
+                var sz = g.MeasureString(initials, font);
+                g.DrawString(initials, font, brush,
                     iconX + (IconSize - sz.Width) / 2, iconY + (IconSize - sz.Height) / 2);
             }
         }
     }
 
-    // Returns the quick-link index (0=GitKraken, 1=Slack) under point p, or -1 if none.
+    // Returns the index into _quickLinks under point p, or -1 if none.
     private int HitTestQuickLink(Point p)
     {
         if (!HasQuickLinksRow) return -1;
@@ -1028,111 +1025,104 @@ internal sealed class OverlayForm : Form
         const int IconGap  = 14;
         const int HitPad   = 4;
 
-        var slots = new List<int>();
-        if (_gitKrakenEnabled) slots.Add(0);
-        if (_slackEnabled)     slots.Add(1);
-
-        int totalW = slots.Count * IconSize + (slots.Count - 1) * IconGap;
+        int count  = _quickLinks.Count;
+        int totalW = count * IconSize + (count - 1) * IconGap;
         int startX = (ClientSize.Width - totalW) / 2;
 
-        for (int i = 0; i < slots.Count; i++)
+        for (int i = 0; i < count; i++)
         {
             int iconX = startX + i * (IconSize + IconGap);
             if (p.X >= iconX - HitPad && p.X < iconX + IconSize + HitPad)
-                return slots[i];
+                return i;
         }
         return -1;
     }
 
-    private static string? TryFindGitKrakenExe()
+    // Up to two letters for the icon-less fallback glyph: the initials of the first two words, or the
+    // first two characters of a single word. Falls back to "?" for an empty name.
+    private static string Initials(string name)
     {
-        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        var standalone = Path.Combine(local, "Programs", "GitKraken", "gitkraken.exe");
-        if (File.Exists(standalone)) return standalone;
-
-        var squirrelDir = Path.Combine(local, "gitkraken");
-        if (Directory.Exists(squirrelDir))
-        {
-            foreach (var sub in Directory.GetDirectories(squirrelDir, "app-*")
-                                         .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
-            {
-                var exe = Path.Combine(sub, "gitkraken.exe");
-                if (File.Exists(exe)) return exe;
-            }
-        }
-
-        return null;
+        var words = name.Split([' ', '-', '_'], StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return "?";
+        if (words.Length == 1)
+            return new string(words[0].Take(2).ToArray()).ToUpperInvariant();
+        return string.Concat(char.ToUpperInvariant(words[0][0]), char.ToUpperInvariant(words[1][0]));
     }
 
-    private static string? TryFindSlackExe()
+    // A stable, reasonably saturated colour derived from the name, so two icon-less links are
+    // visually distinguishable without any per-link configuration.
+    private static Color FallbackColor(string name)
     {
-        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-        var standalone = Path.Combine(local, "Programs", "Slack", "slack.exe");
-        if (File.Exists(standalone)) return standalone;
-
-        var squirrelDir = Path.Combine(local, "slack");
-        if (Directory.Exists(squirrelDir))
-        {
-            foreach (var sub in Directory.GetDirectories(squirrelDir, "app-*")
-                                         .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
-            {
-                var exe = Path.Combine(sub, "slack.exe");
-                if (File.Exists(exe)) return exe;
-            }
-        }
-
-        return null;
+        int hash = 0;
+        foreach (char c in name) hash = hash * 31 + c;
+        int hue = ((hash % 360) + 360) % 360;
+        return ColorFromHsv(hue, 0.55, 0.85);
     }
 
-    private static Bitmap? LoadAndResizeEmbedded(string resourceName, int size)
+    private static Color ColorFromHsv(double h, double s, double v)
     {
-        try
+        int hi = (int)(h / 60) % 6;
+        double f = h / 60 - Math.Floor(h / 60);
+        double p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+        (double r, double g, double b) = hi switch
         {
-            using var stream = typeof(OverlayForm).Assembly.GetManifestResourceStream(resourceName);
-            if (stream == null) return null;
-            using var src = new Bitmap(stream);
-            var result = new Bitmap(size, size);
-            using var ig = Graphics.FromImage(result);
-            ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            ig.DrawImage(src, 0, 0, size, size);
-            return result;
-        }
-        catch { return null; }
+            0 => (v, t, p),
+            1 => (q, v, p),
+            2 => (p, v, t),
+            3 => (p, q, v),
+            4 => (t, p, v),
+            _ => (v, p, q),
+        };
+        return Color.FromArgb((int)(r * 255), (int)(g * 255), (int)(b * 255));
     }
 
     private static Bitmap? LoadAppIcon(string? exePath, int size)
     {
-        if (exePath == null) return null;
+        if (string.IsNullOrWhiteSpace(exePath)) return null;
+
+        // The shell image factory renders a crisp, transparent icon for an ordinary exe; fall back to
+        // the classic exe-icon extraction if it can't.
+        using var src = ShellIcon.Load(exePath, Math.Max(size, 32)) ?? ExtractClassicIcon(exePath);
+        return src == null ? null : ScaleTo(src, size);
+    }
+
+    private static Bitmap? ExtractClassicIcon(string exePath)
+    {
         try
         {
             using var icon = Icon.ExtractAssociatedIcon(exePath);
-            if (icon == null) return null;
-            using var bmp  = icon.ToBitmap();
-            var result = new Bitmap(size, size);
-            using var ig = Graphics.FromImage(result);
-            ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            ig.DrawImage(bmp, 0, 0, size, size);
-            return result;
+            return icon?.ToBitmap();
         }
         catch { return null; }
     }
 
-    // Embedded PNGs take priority; fall back to extracting from the installed exe.
-    private static Bitmap? LoadGitKrakenIcon(int size) =>
-        LoadAndResizeEmbedded("ClaudeWatch.gitkraken.png", size)
-        ?? LoadAppIcon(TryFindGitKrakenExe(), size);
+    // The icon for a quick link. Prefer the icon Windows shows for the app in the Start Menu (matched
+    // by the link's name) — for Store / MSIX apps that's the real package logo, which the bare alias
+    // exe doesn't carry. Fall back to the icon of the resolved executable, then to drawn initials.
+    private static Bitmap? LoadQuickLinkIcon(QuickLink link, int size)
+    {
+        int px = Math.Max(size, 32);  // render larger than the strip, then downscale for crispness
+        using var fromStartMenu = ShellIcon.LoadStartMenuByName(link.Name, px);
+        if (fromStartMenu != null) return ScaleTo(fromStartMenu, size);
 
-    private static Bitmap? LoadSlackIcon(int size) =>
-        LoadAndResizeEmbedded("ClaudeWatch.slack.png", size)
-        ?? LoadAppIcon(TryFindSlackExe(), size);
+        return LoadAppIcon(link.ResolveExe(), size);
+    }
 
-    private static void LaunchOrFocus(string processName, string? exePath)
+    private static Bitmap ScaleTo(Bitmap src, int size)
+    {
+        var result = new Bitmap(size, size);
+        using var ig = Graphics.FromImage(result);
+        ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        ig.DrawImage(src, 0, 0, size, size);
+        return result;
+    }
+
+    // Focuses the app's existing window if it's running, otherwise launches its executable.
+    private static void LaunchOrFocus(QuickLink link)
     {
         try
         {
-            foreach (var p in System.Diagnostics.Process.GetProcessesByName(processName))
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName(link.ProcessName()))
             {
                 if (p.MainWindowHandle != IntPtr.Zero)
                 {
@@ -1140,15 +1130,13 @@ internal sealed class OverlayForm : Form
                     return;
                 }
             }
-            if (exePath != null)
+            var exe = link.ResolveExe();
+            if (exe != null)
                 System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo(exePath) { UseShellExecute = true });
+                    new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
         }
         catch { }
     }
-
-    private static void LaunchOrFocusGitKraken() => LaunchOrFocus("gitkraken", TryFindGitKrakenExe());
-    private static void LaunchOrFocusSlack()     => LaunchOrFocus("slack",     TryFindSlackExe());
 
     private void DrawRow(Graphics g, int rowIdx)
     {
@@ -1406,7 +1394,7 @@ internal sealed class OverlayForm : Form
                 Invalidate();
             }
 
-            // Dwell over the usage strip (only the two bar rows, not the GitKraken row below them).
+            // Dwell over the usage strip (only the two bar rows, not the quick-links row below them).
             int usageStripEnd = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
             bool inStrip = ShowFullPanel && _usageEnabled && e.Y >= HeaderHeight && e.Y < usageStripEnd;
             if (inStrip != _inUsageStrip)
@@ -1478,10 +1466,9 @@ internal sealed class OverlayForm : Form
                     if (int.TryParse(pid, out int pidInt))
                         NativeMethods.FocusTerminalForProcess(pidInt);
                 }
-                else if (HitTestQuickLink(e.Location) is var integ && integ >= 0)
+                else if (HitTestQuickLink(e.Location) is var ql && ql >= 0)
                 {
-                    if (integ == 0) LaunchOrFocusGitKraken();
-                    else if (integ == 1) LaunchOrFocusSlack();
+                    LaunchOrFocus(_quickLinks[ql]);
                 }
                 else if (!_dense && e.Y < HeaderHeight && _sessions.Count > 0)
                 {

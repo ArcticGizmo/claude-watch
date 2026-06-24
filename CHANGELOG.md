@@ -7,7 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-_(nothing — unless you count this very changelog)_
+- Quick Links are now configurable — add, edit, remove, or hide a shortcut to any program on your PC, not just GitKraken and Slack. Existing GitKraken/Slack settings carry over.
+- Quick-link icons are pulled straight from the app (matching the Start Menu), so Microsoft Store apps like Slack now show their real logo instead of a placeholder.
 
 ---
 

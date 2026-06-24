@@ -71,9 +71,12 @@ internal sealed class SettingsForm : Form
     private ToggleSwitch _autoStartToggle = null!;
     private ToggleSwitch _autoCloseToggle = null!;
 
-    // Quick links section.
-    private ToggleSwitch _gitKrakenToggle = null!;
-    private ToggleSwitch _slackToggle     = null!;
+    // Quick links section. The working list is an editable copy of the saved links; every mutation
+    // (add/edit/remove/toggle) rewrites the visible rows and raises QuickLinksChanged. _quickLinksList
+    // is the (manually height-managed) container the rows are rebuilt into.
+    private readonly List<QuickLink> _quickLinks = new();
+    private FlowLayoutPanel _quickLinksList = null!;
+    private FlowLayoutPanel _quickLinkPresets = null!;
 
     private UsageInfo _usage;
 
@@ -95,11 +98,9 @@ internal sealed class SettingsForm : Form
     /// <summary>Raised when the user clicks "Send test notification" for the external (ntfy) channel.</summary>
     public event Action? TestExternalNotificationRequested;
 
-    /// <summary>Raised when the user toggles "Show GitKraken button" (true = enabled).</summary>
-    public event Action<bool>? GitKrakenEnabledChanged;
-
-    /// <summary>Raised when the user toggles "Show Slack button" (true = enabled).</summary>
-    public event Action<bool>? SlackEnabledChanged;
+    /// <summary>Raised whenever the quick-links list changes (add/edit/remove/enable). Carries the
+    /// full current list so the owning context can persist it and refresh the overlay.</summary>
+    public event Action<IReadOnlyList<QuickLink>>? QuickLinksChanged;
 
     public SettingsForm(AppSettings settings, UsageMonitor usageMonitor, UsageInfo currentUsage)
     {
@@ -883,25 +884,198 @@ internal sealed class SettingsForm : Form
     private void BuildQuickLinksPage(FlowLayoutPanel page)
     {
         page.Controls.Add(BodyText(
-            "Show quick-link icons below the usage bars in the overlay. " +
-            "Click an icon to open that app or bring it to focus if it is already running."));
+            "Quick links are a row of icons below the usage bars in the overlay. Click an icon to " +
+            "open that app, or bring it to the front if it's already running. Add a shortcut to any " +
+            "program on your PC; use the toggle to show or hide one without removing it."));
 
         page.Controls.Add(Separator());
 
-        _gitKrakenToggle = MakeToggle();
-        _gitKrakenToggle.Checked = _settings.ShowGitKraken;
-        _gitKrakenToggle.CheckedChanged += (_, _) =>
-            GitKrakenEnabledChanged?.Invoke(_gitKrakenToggle.Checked);
-        page.Controls.Add(TitleRow("GitKraken", _gitKrakenToggle));
+        // Take an editable copy of the saved links so edits aren't committed until raised back out.
+        _quickLinks.Clear();
+        foreach (var l in _settings.QuickLinks ?? Enumerable.Empty<QuickLink>())
+            _quickLinks.Add(l.Clone());
 
-        page.Controls.Add(Separator());
+        // The rows live in a manually height-managed container: it gets its width from the fluid pass
+        // and we set its height to fit the rows we draw into it.
+        _quickLinksList = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents  = false,
+            AutoSize      = false,
+            Margin        = new Padding(0, 0, 0, 8),
+            Padding       = new Padding(0),
+        };
+        _fluidWidth.Add((_quickLinksList, 0));
+        _quickLinksList.Resize += (_, _) => SizeQuickLinkRows();
+        page.Controls.Add(_quickLinksList);
 
-        _slackToggle = MakeToggle();
-        _slackToggle.Checked = _settings.ShowSlack;
-        _slackToggle.CheckedChanged += (_, _) =>
-            SlackEnabledChanged?.Invoke(_slackToggle.Checked);
-        page.Controls.Add(TitleRow("Slack", _slackToggle));
+        var addRow = ButtonRow();
+        var addBtn = MakeButton("Add quick link…");
+        addBtn.Click += (_, _) => AddOrEditQuickLink(null);
+        addRow.Controls.Add(addBtn);
+        page.Controls.Add(addRow);
+
+        // One-click adds for the well-known apps Claude Watch ships icons for, shown only while they
+        // aren't already in the list.
+        _quickLinkPresets = ButtonRow();
+        page.Controls.Add(_quickLinkPresets);
+
+        RebuildQuickLinksList();
     }
+
+    // Rebuilds every quick-link row from the working list (and refreshes the preset buttons). Called
+    // after any structural change — add, remove, or edit.
+    private void RebuildQuickLinksList()
+    {
+        foreach (Control c in _quickLinksList.Controls) c.Dispose();
+        _quickLinksList.Controls.Clear();
+
+        if (_quickLinks.Count == 0)
+        {
+            _quickLinksList.Controls.Add(new Label
+            {
+                Text      = "No quick links yet — add one below.",
+                AutoSize  = true,
+                ForeColor = Theme.Muted,
+                Margin    = new Padding(0, 4, 0, 4),
+            });
+        }
+        else
+        {
+            foreach (var link in _quickLinks)
+                _quickLinksList.Controls.Add(BuildQuickLinkRow(link));
+        }
+
+        SizeQuickLinkRows();
+        RebuildPresetButtons();
+    }
+
+    // A single editable quick-link row: an enable toggle, the name and its target path, and Edit /
+    // Remove buttons. The link object is captured directly so the row keeps working across reorders.
+    private Panel BuildQuickLinkRow(QuickLink link)
+    {
+        var row = new Panel { Height = 50, Margin = new Padding(0, 0, 0, 6), BackColor = Theme.FormBg };
+
+        var toggle = MakeToggle();
+        toggle.Checked = link.Enabled;
+        toggle.CheckedChanged += (_, _) => { link.Enabled = toggle.Checked; RaiseQuickLinksChanged(); };
+
+        var name = new Label
+        {
+            Text      = string.IsNullOrWhiteSpace(link.Name) ? "(unnamed)" : link.Name,
+            AutoSize  = true,
+            ForeColor = Theme.Title,
+            Font      = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point),
+        };
+        var path = new Label
+        {
+            Text         = QuickLinkSubtitle(link),
+            AutoSize     = false,
+            AutoEllipsis = true,
+            Height       = 18,
+            ForeColor    = Theme.Muted,
+            Font         = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point),
+        };
+
+        var edit = MakeButton("Edit");
+        edit.Click += (_, _) => AddOrEditQuickLink(link);
+        var remove = MakeButton("Remove");
+        remove.ForeColor = Theme.Danger;
+        remove.Click += (_, _) => { _quickLinks.Remove(link); RebuildQuickLinksList(); RaiseQuickLinksChanged(); };
+
+        row.Controls.Add(toggle);
+        row.Controls.Add(name);
+        row.Controls.Add(path);
+        row.Controls.Add(edit);
+        row.Controls.Add(remove);
+
+        void Position()
+        {
+            int midY = row.Height / 2;
+            toggle.Location = new Point(0, midY - toggle.Height / 2);
+
+            // Buttons right-aligned: Remove flush to the edge, Edit just to its left.
+            remove.Location = new Point(Math.Max(0, row.Width - remove.Width), midY - remove.Height / 2);
+            edit.Location   = new Point(Math.Max(0, remove.Left - edit.Width - 6), midY - edit.Height / 2);
+
+            int textLeft  = toggle.Right + 12;
+            int textRight = edit.Left - 8;
+            name.Location = new Point(textLeft, 6);
+            path.Location = new Point(textLeft, 27);
+            path.Width    = Math.Max(20, textRight - textLeft);
+        }
+        row.Resize += (_, _) => Position();
+        Position();
+        return row;
+    }
+
+    // The dim subtitle under a link's name: its explicit path, an auto-detected path for a preset
+    // with no path set, or a hint when nothing resolves.
+    private static string QuickLinkSubtitle(QuickLink link)
+    {
+        if (!string.IsNullOrWhiteSpace(link.ExePath))
+            return File.Exists(link.ExePath) ? link.ExePath : link.ExePath + "   ⚠ file not found";
+        var resolved = link.ResolveExe();
+        if (resolved != null) return resolved + "  (auto-detected)";
+        return "Not found — install the app, or Edit to set its path";
+    }
+
+    // Sets each row to the container's width and the container's height to fit the rows.
+    private void SizeQuickLinkRows()
+    {
+        if (_quickLinksList is null) return;
+        int w = _quickLinksList.ClientSize.Width;
+        int totalH = 0;
+        foreach (Control row in _quickLinksList.Controls)
+        {
+            if (row is Panel) row.Width = Math.Max(40, w);
+            totalH += row.Height + row.Margin.Vertical;
+        }
+        _quickLinksList.Height = Math.Max(1, totalH);
+    }
+
+    // Shows a "+ App" button for each shipped preset not already in the list.
+    private void RebuildPresetButtons()
+    {
+        foreach (Control c in _quickLinkPresets.Controls) c.Dispose();
+        _quickLinkPresets.Controls.Clear();
+
+        foreach (var preset in KnownApps.PresetNames)
+        {
+            if (_quickLinks.Any(l => string.Equals(l.Name, preset, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            var btn = MakeButton("+ " + preset);
+            btn.Click += (_, _) =>
+            {
+                _quickLinks.Add(new QuickLink { Name = preset, ExePath = KnownApps.FindByName(preset) ?? "", Enabled = true });
+                RebuildQuickLinksList();
+                RaiseQuickLinksChanged();
+            };
+            _quickLinkPresets.Controls.Add(btn);
+        }
+        _quickLinkPresets.Visible = _quickLinkPresets.Controls.Count > 0;
+    }
+
+    // Opens the add/edit dialog; on OK, applies the result to a new or existing link and republishes.
+    private void AddOrEditQuickLink(QuickLink? existing)
+    {
+        using var dlg = new QuickLinkDialog(existing);
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        if (existing == null)
+            _quickLinks.Add(new QuickLink { Name = dlg.LinkName, ExePath = dlg.LinkPath, Enabled = true });
+        else
+        {
+            existing.Name    = dlg.LinkName;
+            existing.ExePath = dlg.LinkPath;
+        }
+        RebuildQuickLinksList();
+        RaiseQuickLinksChanged();
+    }
+
+    private void RaiseQuickLinksChanged() =>
+        QuickLinksChanged?.Invoke(_quickLinks.Select(l => l.Clone()).ToList());
 
     // ── About ─────────────────────────────────────────────────────────────────────
     private void BuildAboutPage(FlowLayoutPanel page)
