@@ -37,6 +37,10 @@ internal sealed class SettingsForm : Form
     // available width minus an optional inset; wrap labels get their MaximumSize updated so AutoSize
     // re-wraps to the new width.
     private readonly List<(Control c, int inset)> _fluidWidth = new();
+    // Same as _fluidWidth but the inset is computed live, for controls whose reserved space depends
+    // on sibling widths that themselves scale with DPI (e.g. the topic box sharing a row with the
+    // auto-sized Generate/QR buttons).
+    private readonly List<(Control c, Func<int> inset)> _fluidWidthDynamic = new();
     private readonly List<Label> _fluidWrap = new();
 
     // Usage section.
@@ -45,10 +49,12 @@ internal sealed class SettingsForm : Form
     private UsageBarsControl _usageBars          = null!;
     private Button           _usageRefreshBtn    = null!;
 
-    // Notifications section. The master toggle gates the per-type sub-rows (toggle + Test button),
-    // which dim while it's off.
+    // Notifications section. The master toggle gates the per-type sub-rows (a pop-up toggle, a chime
+    // toggle, their captions, and the Test button), all of which dim while it's off.
     private ToggleSwitch _notifyMasterToggle = null!;
-    private readonly List<(Label label, ToggleSwitch toggle, Button test)> _notifySubRows = new();
+    private readonly List<NotifyRow> _notifySubRows = new();
+    private sealed record NotifyRow(
+        Label Label, ToggleSwitch Popup, ToggleSwitch Chime, Button Test, Label PopupCap, Label ChimeCap);
 
     // External notifications (ntfy) section. The host/topic boxes stay editable regardless of the
     // toggle, so they can be set up (and tested) before the feature is switched on.
@@ -281,6 +287,8 @@ internal sealed class SettingsForm : Form
         int w = FluidWidth();
         foreach (var (c, inset) in _fluidWidth)
             c.Width = Math.Max(40, w - inset);
+        foreach (var (c, inset) in _fluidWidthDynamic)
+            c.Width = Math.Max(40, w - inset());
         foreach (var l in _fluidWrap)
             l.MaximumSize = new Size(w, 0);
     }
@@ -551,19 +559,24 @@ internal sealed class SettingsForm : Form
         page.Controls.Add(TitleRow("Notifications", _notifyMasterToggle));
 
         page.Controls.Add(BodyText(
-            "Windows desktop notifications when a session needs you. Turn the whole feature off, " +
-            "or just the types you don't want. Use Test to preview one."));
+            "Windows desktop notifications when a session needs you. Each type has a pop-up and an " +
+            "optional chime (the built-in Windows sound, off by default). Turn the whole feature off, " +
+            "or just the parts you don't want. Use Test to preview one."));
 
         page.Controls.Add(BuildNotifyRow(
             "Done — a session finished working",
             _settings.NotifyOnDone,
             v => { _settings.NotifyOnDone = v; _settings.Save(); },
+            _settings.ChimeOnDone,
+            v => { _settings.ChimeOnDone = v; _settings.Save(); },
             NotificationKind.Done));
 
         page.Controls.Add(BuildNotifyRow(
             "Waiting for input — a session is blocked on a prompt",
             _settings.NotifyOnWaitingInput,
             v => { _settings.NotifyOnWaitingInput = v; _settings.Save(); },
+            _settings.ChimeOnWaitingInput,
+            v => { _settings.ChimeOnWaitingInput = v; _settings.Save(); },
             NotificationKind.WaitingForInput));
 
         ApplyNotifyEnabled();
@@ -573,9 +586,14 @@ internal sealed class SettingsForm : Form
         BuildExternalSection(page);
     }
 
-    // An indented sub-row for one notification type: a label, a "Test" button, and a toggle on the
-    // right. The trio is tracked so ApplyNotifyEnabled can dim it when the master switch is off.
-    private Panel BuildNotifyRow(string text, bool initial, Action<bool> onChanged, NotificationKind kind)
+    // An indented sub-row for one notification type: a label, a "Test" button, and two captioned
+    // toggles on the right — "Pop-up" (the desktop balloon) and "Chime" (the Windows sound). The
+    // controls are tracked so ApplyNotifyEnabled can dim the whole row when the master switch is off.
+    private Panel BuildNotifyRow(
+        string text,
+        bool popupInitial, Action<bool> onPopupChanged,
+        bool chimeInitial, Action<bool> onChimeChanged,
+        NotificationKind kind)
     {
         var row = new Panel
         {
@@ -591,45 +609,73 @@ internal sealed class SettingsForm : Form
             Location  = new Point(16, 7),
         };
 
-        var toggle = MakeToggle();
-        toggle.Checked  = initial;
-        toggle.CheckedChanged += (_, _) => onChanged(toggle.Checked);
+        var popup = MakeToggle();
+        popup.Checked  = popupInitial;
+        popup.CheckedChanged += (_, _) => onPopupChanged(popup.Checked);
+        var popupCap = ToggleCaption("Pop-up");
 
+        var chime = MakeToggle();
+        chime.Checked  = chimeInitial;
+        chime.CheckedChanged += (_, _) => onChimeChanged(chime.Checked);
+        var chimeCap = ToggleCaption("Chime");
+
+        // Let the button auto-size to its text + padding so its height tracks the font at any DPI.
+        // A fixed height clips the label's descenders on >100%-scaled monitors (PerMonitorV2). Both
+        // rows carry the same "Test" text, so they stay the same width regardless.
         var test = MakeButton("Test");
-        test.AutoSize  = false;
-        test.Size      = new Size(56, 24);
         test.Margin    = new Padding(0);
-        test.Padding   = new Padding(0);
         test.TextAlign = ContentAlignment.MiddleCenter;
         test.Click   += (_, _) => TestNotificationRequested?.Invoke(kind);
 
         row.Controls.Add(label);
         row.Controls.Add(test);
-        row.Controls.Add(toggle);
+        row.Controls.Add(chimeCap);
+        row.Controls.Add(chime);
+        row.Controls.Add(popupCap);
+        row.Controls.Add(popup);
 
-        // Right-align the toggle and Test button to the row's current width whenever it changes.
+        // Right-align the captioned toggles and Test button to the row's current width. Laid out
+        // from the right edge inward: [Test] … [Chime cap][chime] [Pop-up cap][popup].
         void Position()
         {
-            toggle.Location = new Point(row.Width - toggle.Width, (row.Height - toggle.Height) / 2);
-            test.Location   = new Point(toggle.Left - test.Width - 12, (row.Height - test.Height) / 2);
+            int Mid(Control c) => (row.Height - c.Height) / 2;
+            int x = row.Width;
+            x -= popup.Width;    popup.Location    = new Point(x, Mid(popup));
+            x -= 4 + popupCap.Width; popupCap.Location = new Point(x, Mid(popupCap));
+            x -= 14 + chime.Width;   chime.Location    = new Point(x, Mid(chime));
+            x -= 4 + chimeCap.Width; chimeCap.Location = new Point(x, Mid(chimeCap));
+            x -= 14 + test.Width;    test.Location     = new Point(x, Mid(test));
         }
         row.Resize += (_, _) => Position();
         _fluidWidth.Add((row, 0));
         Position();
 
-        _notifySubRows.Add((label, toggle, test));
+        _notifySubRows.Add(new NotifyRow(label, popup, chime, test, popupCap, chimeCap));
         return row;
     }
 
-    // Dims the per-type sub-rows (label, toggle, Test) whenever the master switch is off.
+    // A muted, vertically-centred caption sitting to the left of an inline toggle.
+    private static Label ToggleCaption(string text) => new()
+    {
+        Text      = text,
+        AutoSize  = true,
+        ForeColor = Theme.Muted,
+        Font      = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point),
+    };
+
+    // Dims every per-type sub-row control (labels, both toggles, Test) when the master switch is off.
     private void ApplyNotifyEnabled()
     {
         bool on = _notifyMasterToggle.Checked;
-        foreach (var (label, toggle, test) in _notifySubRows)
+        var capColor = on ? Theme.Muted : Theme.Border;
+        foreach (var r in _notifySubRows)
         {
-            toggle.Enabled   = on;
-            test.Enabled     = on;
-            label.ForeColor  = on ? Theme.Fg : Theme.Muted;
+            r.Popup.Enabled   = on;
+            r.Chime.Enabled   = on;
+            r.Test.Enabled    = on;
+            r.Label.ForeColor    = on ? Theme.Fg : Theme.Muted;
+            r.PopupCap.ForeColor = capColor;
+            r.ChimeCap.ForeColor = capColor;
         }
     }
 
@@ -681,17 +727,13 @@ internal sealed class SettingsForm : Form
 
         _ntfyTopicBox = MakeTextBox(_settings.NtfyTopic ?? "");
         _ntfyTopicBox.Margin = new Padding(0, 0, 8, 0);
-        // The topic box shares its row with the Generate (86) + QR (78) buttons and their margins,
-        // so it gets the available width less ~180px.
-        _fluidWidth.Add((_ntfyTopicBox, 180));
         _ntfyTopicBox.TextChanged += (_, _) => _settings.NtfyTopic = _ntfyTopicBox.Text;
         _ntfyTopicBox.Leave       += (_, _) => _settings.Save();
 
+        // Auto-size the helper buttons so their height tracks the font at any DPI — a fixed height
+        // clips the text on >100%-scaled monitors (PerMonitorV2), same as the per-type Test buttons.
         var genBtn = MakeButton("Generate");
-        genBtn.AutoSize  = false;
-        genBtn.Size      = new Size(86, 24);
         genBtn.Margin    = new Padding(0, 0, 8, 0);
-        genBtn.Padding   = new Padding(0);
         genBtn.TextAlign = ContentAlignment.MiddleCenter;
         genBtn.Click += (_, _) =>
         {
@@ -700,12 +742,16 @@ internal sealed class SettingsForm : Form
         };
 
         var qrBtn = MakeButton("QR code");
-        qrBtn.AutoSize  = false;
-        qrBtn.Size      = new Size(78, 24);
         qrBtn.Margin    = new Padding(0);
-        qrBtn.Padding   = new Padding(0);
         qrBtn.TextAlign = ContentAlignment.MiddleCenter;
         qrBtn.Click += (_, _) => ShowTopicQr();
+
+        // The topic box fills the row, less whatever the two auto-sized buttons currently occupy
+        // (their widths scale with DPI, so the reserved space is computed live, not hard-coded).
+        _fluidWidthDynamic.Add((_ntfyTopicBox, () =>
+            _ntfyTopicBox.Margin.Right
+            + genBtn.Width + genBtn.Margin.Horizontal
+            + qrBtn.Width  + qrBtn.Margin.Horizontal));
 
         topicRow.Controls.Add(_ntfyTopicBox);
         topicRow.Controls.Add(genBtn);

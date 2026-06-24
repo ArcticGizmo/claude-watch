@@ -4,9 +4,9 @@
     - Maybe hooks can help?
 - add the ability to manage and customise statuslines
   - this may actually be a separate app, but I would like to be able to get all the information well formatted and swap between them at will
+- Ignore some built in claude commands from showing notification alerts (like /clear /doctor)
 
 ## Quick wins
-- sound notifications — soft chime on "needs attention" / session done (SystemSounds or custom WAV)
 - session count badge on tray icon — render active session count as a number overlay on the tray icon
 - global hotkey — system-wide shortcut (configurable) to show/hide the overlay
 

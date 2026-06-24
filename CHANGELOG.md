@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.32] - 2026-06-24
+
+- Optional chime when a session needs you — the built-in Windows sound, off by default, opt in per notification type
+- External (ntfy) alerts stay silent; the chime is for the desktop in front of you
+- Fixed settings buttons clipping their text at the bottom on scaled displays (they were holding their breath)
+
+---
+
 ## [v0.0.31] - 2026-06-24
 
 - Configurable Quick Links — shortcut to any app, not just GitKraken and Slack (existing settings carry over)

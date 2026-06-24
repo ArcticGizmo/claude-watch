@@ -18,15 +18,22 @@ internal sealed class AppSettings
     // at ~28%). Defaults to true; only visible while ShowUsage is also true.
     public bool ShowExpectedUsageRate { get; set; } = true;
 
-    // Master switch for Windows desktop (toast/balloon) notifications. When off, no session
-    // balloon is ever shown; the overlay's own attention flash is unaffected. The per-type
-    // switches below only take effect while this is on.
+    // Master switch for Windows desktop (toast/balloon) notifications and chimes. When off, no
+    // session balloon is ever shown and no chime is played; the overlay's own attention flash is
+    // unaffected. The per-type switches below only take effect while this is on.
     public bool NotificationsEnabled { get; set; } = true;
 
     // Per-type switches: "Done" fires when a session finishes working (busy -> idle);
     // "WaitingForInput" fires when a session is blocked on a prompt (e.g. a permission request).
     public bool NotifyOnDone { get; set; } = true;
     public bool NotifyOnWaitingInput { get; set; } = true;
+
+    // Per-type sound switches: play the built-in Windows system chime when that notification type
+    // fires (Done -> Asterisk, WaitingForInput -> Exclamation). Independent of the balloon switches
+    // above but gated by NotificationsEnabled. Off by default — the chime opts in per type. External
+    // (ntfy) pushes never chime; sound is for the local desktop only.
+    public bool ChimeOnDone { get; set; }
+    public bool ChimeOnWaitingInput { get; set; }
 
     // External notifications via ntfy (https://ntfy.sh). The master switch gates whether any
     // external push is sent and whether the per-session toggle is offered in the overlay; the

@@ -380,6 +380,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         if (_settings.NotificationsEnabled && _settings.NotifyOnDone)
             ShowSessionBalloon(NotificationKind.Done, session.ProjectName, session.Pid);
 
+        if (_settings.NotificationsEnabled && _settings.ChimeOnDone)
+            PlayChime(NotificationKind.Done);
+
         MaybeSendExternal(NotificationKind.Done, session);
     }
 
@@ -389,6 +392,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         if (_settings.NotificationsEnabled && _settings.NotifyOnWaitingInput)
             ShowSessionBalloon(NotificationKind.WaitingForInput, session.ProjectName, session.Pid);
+
+        if (_settings.NotificationsEnabled && _settings.ChimeOnWaitingInput)
+            PlayChime(NotificationKind.WaitingForInput);
 
         MaybeSendExternal(NotificationKind.WaitingForInput, session);
     }
@@ -414,10 +420,31 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _notifyIcon.ShowBalloonTip(8000);
     }
 
-    // Fired by the settings window's per-type "Test" buttons: shows a sample balloon so the user
-    // can preview exactly what that notification looks like, regardless of the saved toggles.
+    // Fired by the settings window's per-type "Test" buttons: shows a sample balloon and plays the
+    // chime so the user can preview exactly what that notification looks and sounds like, regardless
+    // of the saved toggles.
     private void ShowTestNotification(NotificationKind kind)
-        => ShowSessionBalloon(kind, "example-project", null);
+    {
+        ShowSessionBalloon(kind, "example-project", null);
+        PlayChime(kind);
+    }
+
+    // Plays the built-in Windows system chime matching a notification type. Asterisk is the soft
+    // "information" tone (Done); Exclamation is the sharper "attention" tone (WaitingForInput). Both
+    // are fire-and-forget and honour the user's per-event sound scheme in Windows. External (ntfy)
+    // pushes deliberately never reach here — sound is a local-desktop affordance only.
+    private static void PlayChime(NotificationKind kind)
+    {
+        switch (kind)
+        {
+            case NotificationKind.Done:
+                System.Media.SystemSounds.Asterisk.Play();
+                break;
+            case NotificationKind.WaitingForInput:
+                System.Media.SystemSounds.Exclamation.Play();
+                break;
+        }
+    }
 
     // ── External (ntfy) notifications ─────────────────────────────────────────────
     // Flips a session's external-notify opt-in from the overlay's right-click menu by writing or
