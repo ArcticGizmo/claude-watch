@@ -9,6 +9,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.34] - 2026-06-24
+
+- Focus sessions running in VS Code's integrated terminal, not just standalone terminal windows
+- Picks the correct project window when one VS Code hosts several (previously pot luck)
+
+---
+
 ## [v0.0.33] - 2026-06-24
 
 - New Session stats window — today's sessions, active time, prompts and tool calls, plus token totals, an equivalent API cost, an hourly activity heatmap, and breakdowns by project, tool, model, and git branch

@@ -59,6 +59,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // can focus the right terminal.
     private string? _lastNotifiedPid;
 
+    // Project name of that session, used to disambiguate when its host (e.g. VSCode) owns
+    // several windows. Tracked alongside _lastNotifiedPid.
+    private string? _lastNotifiedProject;
+
     // Latched while a check/download/apply is in flight so a second click (the menu and the settings
     // window both reach CheckForUpdates) can't kick off a parallel run and race two installs.
     private bool _updateInProgress;
@@ -472,6 +476,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private void ShowSessionBalloon(NotificationKind kind, string projectName, string? pid)
     {
         _lastNotifiedPid = pid;
+        _lastNotifiedProject = projectName;
         switch (kind)
         {
             case NotificationKind.Done:
@@ -600,6 +605,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private void ShowInfoBalloon(string title, string text, ToolTipIcon icon)
     {
         _lastNotifiedPid = null;
+        _lastNotifiedProject = null;
         _notifyIcon.BalloonTipTitle = title;
         _notifyIcon.BalloonTipText  = text;
         _notifyIcon.BalloonTipIcon  = icon;
@@ -614,7 +620,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         if (pid == null) return;
 
         if (int.TryParse(pid, out int pidInt))
-            NativeMethods.FocusTerminalForProcess(pidInt);
+            NativeMethods.FocusTerminalForProcess(pidInt, _lastNotifiedProject);
 
         AcknowledgeSession(pid);
     }
@@ -637,6 +643,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
         // Update balloons aren't tied to a session; don't let a click focus a stale terminal.
         _lastNotifiedPid = null;
+        _lastNotifiedProject = null;
         try
         {
             var mgr = new UpdateManager(new GithubSource("https://github.com/ArcticGizmo/claude-watch", null, false));
