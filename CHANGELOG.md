@@ -9,13 +9,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.33] - 2026-06-24
+
+- New Session stats window — today's sessions, active time, prompts and tool calls, plus token totals, an equivalent API cost, an hourly activity heatmap, and breakdowns by project, tool, model, and git branch
+- Switch between Today, the last 7 or 30 days, and all time, with a daily activity trend, a day-streak counter, and records (busiest day, longest single session)
+- "Today: N sessions · 3h 12m active" now shows in the tray right-click menu — read straight from your transcripts, so there's history from the moment you install it
+- A Session Stats settings page to hide the tray line, hide the cost, or tune the idle threshold that decides what counts as "active"
+- Cost is labelled "equivalent API cost" — what the tokens would have cost pay-as-you-go, not a bil
+
+---
+
 ## [v0.0.32] - 2026-06-24
 
 - Optional chime when a session needs you — the built-in Windows sound, off by default, opt in per notification type
 - External (ntfy) alerts stay silent; the chime is for the desktop in front of you
 - Fixed settings buttons clipping their text at the bottom on scaled displays (they were holding their breath)
 
----
 
 ## [v0.0.31] - 2026-06-24
 
