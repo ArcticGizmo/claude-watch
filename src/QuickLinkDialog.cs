@@ -10,6 +10,10 @@ internal sealed class QuickLinkDialog : Form
 {
     private readonly TextBox _nameBox;
     private readonly TextBox _pathBox;
+    private readonly Label   _statusLabel;
+
+    // Debounces the Start Menu name lookup so it runs after the user pauses typing, not per keystroke.
+    private readonly System.Windows.Forms.Timer _nameCheck;
 
     public string LinkName => _nameBox.Text.Trim();
     public string LinkPath => _pathBox.Text.Trim();
@@ -25,18 +29,34 @@ internal sealed class QuickLinkDialog : Form
         BackColor       = Theme.FormBg;
         ForeColor       = Theme.Fg;
         Font            = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        ClientSize      = new Size(440, 196);
+        ClientSize      = new Size(460, 278);
 
-        const int pad = 16;
+        const int pad = 16, gap = 8, browseW = 92;
         int innerW = ClientSize.Width - pad * 2;
 
-        var nameCaption = Caption("Name", pad, pad);
+        var help = new Label
+        {
+            Text      = "Name the link after the app. If an installed app matches that name, its icon " +
+                        "is found automatically and a program path is optional — otherwise choose one below.",
+            AutoSize  = false,
+            ForeColor = Theme.Muted,
+            Bounds    = new Rectangle(pad, pad, innerW, 46),
+        };
+
+        var nameCaption = Caption("Name", pad, help.Bottom + 6);
         _nameBox = MakeTextBox(existing?.Name ?? "");
         _nameBox.SetBounds(pad, nameCaption.Bottom + 4, innerW, _nameBox.Height);
 
-        var pathCaption = Caption("Program (.exe)", pad, _nameBox.Bottom + 12);
+        // Live result of the name lookup — sits directly under the Name box.
+        _statusLabel = new Label
+        {
+            AutoSize  = false,
+            ForeColor = Theme.Muted,
+            Bounds    = new Rectangle(pad, _nameBox.Bottom + 5, innerW, 30),
+        };
+
+        var pathCaption = Caption("Program (optional)", pad, _statusLabel.Bottom + 6);
         _pathBox = MakeTextBox(existing?.ExePath ?? "");
-        const int browseW = 92, gap = 8;
         _pathBox.SetBounds(pad, pathCaption.Bottom + 4, innerW - browseW - gap, _pathBox.Height);
 
         var browse = MakeButton("Browse…");
@@ -53,12 +73,20 @@ internal sealed class QuickLinkDialog : Form
         cancel.SetBounds(ClientSize.Width - pad - btnW, btnY, btnW, btnH);
         ok.SetBounds(cancel.Left - btnW - gap, btnY, btnW, btnH);
 
-        // Guard against an empty name — the overlay needs something to label the icon's fallback.
-        void Validate() => ok.Enabled = _nameBox.Text.Trim().Length > 0;
-        _nameBox.TextChanged += (_, _) => Validate();
-        Validate();
+        _nameCheck = new System.Windows.Forms.Timer { Interval = 350 };
+        _nameCheck.Tick += (_, _) => { _nameCheck.Stop(); RefreshNameStatus(); };
 
-        Controls.AddRange([nameCaption, _nameBox, pathCaption, _pathBox, browse, ok, cancel]);
+        // Guard against an empty name — the overlay needs something to label the icon's fallback.
+        void OnNameChanged()
+        {
+            ok.Enabled = _nameBox.Text.Trim().Length > 0;
+            _nameCheck.Stop();
+            _nameCheck.Start();
+        }
+        _nameBox.TextChanged += (_, _) => OnNameChanged();
+        ok.Enabled = _nameBox.Text.Trim().Length > 0;
+
+        Controls.AddRange([help, nameCaption, _nameBox, _statusLabel, pathCaption, _pathBox, browse, ok, cancel]);
         AcceptButton = ok;
         CancelButton = cancel;
     }
@@ -67,6 +95,37 @@ internal sealed class QuickLinkDialog : Form
     {
         base.OnHandleCreated(e);
         NativeMethods.UseDarkTitleBar(Handle);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        RefreshNameStatus();  // reflect the initial name (e.g. when editing an existing link)
+    }
+
+    // Looks up the current name in the Start Menu and reports whether it resolves on its own. Run on
+    // the UI thread off the debounce timer; the lookup is quick enough not to need a worker.
+    private void RefreshNameStatus()
+    {
+        string name = _nameBox.Text.Trim();
+        if (name.Length == 0)
+        {
+            SetStatus("", Theme.Muted);
+        }
+        else if (ShellIcon.StartMenuAppExists(name))
+        {
+            SetStatus($"✓  Found “{name}” in your Start Menu — a program path is optional.", Theme.Green);
+        }
+        else
+        {
+            SetStatus($"No installed app matches “{name}”. Set a program below to give it an icon.", Theme.Muted);
+        }
+    }
+
+    private void SetStatus(string text, Color color)
+    {
+        _statusLabel.Text      = text;
+        _statusLabel.ForeColor = color;
     }
 
     private void Browse()
@@ -122,5 +181,11 @@ internal sealed class QuickLinkDialog : Form
         b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
         b.FlatAppearance.MouseDownBackColor = Theme.Border;
         return b;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _nameCheck?.Dispose();
+        base.Dispose(disposing);
     }
 }
