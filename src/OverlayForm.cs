@@ -23,6 +23,7 @@ internal sealed class OverlayForm : Form
     private const int Corner            = 10;
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
     private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
+    private const int ThermoIconWidth   = 12;  // width reserved for the context-pressure thermometer
     private const int QuickLinksRowHeight = 24; // height of the quick-links icon strip below the usage bars
 
     // Default vertical gap below the top of the working area for the floating panel. Sized to
@@ -1279,8 +1280,10 @@ internal sealed class OverlayForm : Form
         int mailWidth    = mail ? MailIconWidth : 0;
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
         int rcWidth      = session.RemoteControlled ? RcIconWidth : 0;
+        float ctxFill    = session.ContextFill ?? 0f;
+        int thermoWidth  = ctxFill >= 0.50f ? ThermoIconWidth + 2 : 0;  // icon + 2 px gap right
         var statusSz     = g.MeasureString(statusText, statusFont);
-        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth;
+        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth - thermoWidth;
         var nameTrunc    = TruncateString(g, session.DisplayName, nameFont, nameMaxWidth);
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
@@ -1294,12 +1297,30 @@ internal sealed class OverlayForm : Form
         g.DrawString(nameTrunc, nameFont, fgBrush,
             HorizPad + 14 + mailWidth + rcWidth, nameMidY - nameSz.Height / 2);
 
+        // DEBUG: context window size + fill next to the session name — remove when verified.
+        {
+            string win = session.ContextWindow >= ModelContext.ExtendedWindow ? "1M" : "200k";
+            string dbg = session.ContextFill is { } cf
+                ? $" [{win} · {(int)(cf * 100)}%]"
+                : $" [{win}]";
+            using var dbgBrush = new SolidBrush(Color.FromArgb(130, 255, 210, 60));
+            using var dbgFont  = new Font("Segoe UI", 7f, GraphicsUnit.Point);
+            var dbgSz = g.MeasureString(dbg, dbgFont);
+            g.DrawString(dbg, dbgFont, dbgBrush,
+                HorizPad + 14 + mailWidth + rcWidth + nameSz.Width,
+                nameMidY - dbgSz.Height / 2);
+        }
+
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
             statusX, nameMidY - statusSz.Height / 2);
 
+        // Thermometer: to the right of the mode badge (between badge and status text).
+        if (thermoWidth > 0)
+            DrawThermoIcon(g, ctxFill, statusX - thermoWidth, nameMidY);
+
         if (session.Mode != PermissionMode.Normal)
-            DrawModeBadge(g, session.Mode, statusX - badgeWidth, nameMidY);
+            DrawModeBadge(g, session.Mode, statusX - thermoWidth - badgeWidth, nameMidY);
 
         if (twoLine)
         {
@@ -1345,6 +1366,53 @@ internal sealed class OverlayForm : Form
         // colour (Plan is blue). A pause-style badge read too much like an idle session.
         g.FillPolygon(brush, new[] { new Point(x,     midY - 4), new Point(x + 5,  midY), new Point(x,     midY + 4) });
         g.FillPolygon(brush, new[] { new Point(x + 6, midY - 4), new Point(x + 11, midY), new Point(x + 6, midY + 4) });
+    }
+
+    // Context-pressure thermometer: tube (4 px wide, 9 px tall) + bulb (8 px diameter), with mercury
+    // rising from the bottom. Only drawn when fill ≥ 50 %; colour shifts yellow → orange → red.
+    // x is the left edge of the reserved ThermoIconWidth area; midY is the vertical row centre.
+    private static void DrawThermoIcon(Graphics g, float fill, int x, int midY)
+    {
+        if (fill < 0.50f) return;
+
+        var old = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        Color col = fill >= 0.80f ? Color.FromArgb(239, 68,  68)   // red
+                  : fill >= 0.65f ? Color.FromArgb(249, 115, 22)   // orange
+                                  : Color.FromArgb(234, 179,  8);  // yellow
+
+        // Tube: 4 px wide, top at midY-7, bottom at midY+2 (9 px).
+        // Bulb: 8 px diameter circle whose top edge overlaps the tube bottom by 2 px.
+        int cx     = x + 5;
+        var tube   = new Rectangle(cx - 2, midY - 7, 4, 9);
+        var bulb   = new Rectangle(cx - 4, midY,     8, 8);
+
+        using var dimBrush     = new SolidBrush(Color.FromArgb(30,  255, 255, 255));
+        using var colBrush     = new SolidBrush(col);
+        using var outlinePen   = new Pen(Color.FromArgb(80,  255, 255, 255), 1f);
+
+        // Glass background.
+        using var tubePath = RoundedRect(tube, 2);
+        g.FillPath(dimBrush, tubePath);
+        g.FillEllipse(dimBrush, bulb);
+
+        // Mercury fill inside the tube (rises from bottom).
+        int innerH  = tube.Height - 2;  // 1 px margin top and bottom
+        int fillPx  = Math.Clamp((int)(fill * innerH), 0, innerH);
+        if (fillPx > 0)
+            g.FillRectangle(colBrush,
+                new Rectangle(tube.X + 1, tube.Bottom - 1 - fillPx, tube.Width - 2, fillPx));
+
+        // Bulb is always filled when the icon is visible.
+        g.FillEllipse(colBrush,
+            new Rectangle(bulb.X + 1, bulb.Y + 1, bulb.Width - 2, bulb.Height - 2));
+
+        // Glass outline.
+        g.DrawPath(outlinePen, tubePath);
+        g.DrawEllipse(outlinePen, bulb);
+
+        g.SmoothingMode = old;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

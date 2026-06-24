@@ -310,6 +310,8 @@ internal sealed class SessionMonitor : IDisposable
                 ? _transcripts.GetActivity(sessionId, cwd)
                 : null;
 
+            var (contextFill, contextWindow) = _transcripts.GetContextFill(sessionId, cwd);
+
             var session = new ClaudeSession(
                 pid,
                 sessionId,
@@ -323,7 +325,9 @@ internal sealed class SessionMonitor : IDisposable
                 runningSince,
                 bridgeSessionId,
                 externalNotify,
-                title
+                title,
+                contextFill,
+                contextWindow
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))

@@ -49,7 +49,9 @@ public record ClaudeSession(
     DateTime? RunningSince = null,
     string? BridgeSessionId = null,
     bool ExternalNotify = false,
-    string? Title = null
+    string? Title = null,
+    float? ContextFill = null,
+    int ContextWindow = ModelContext.DefaultWindow
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
