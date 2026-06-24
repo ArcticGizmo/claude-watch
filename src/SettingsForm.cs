@@ -1013,10 +1013,19 @@ internal sealed class SettingsForm : Form
     // with no path set, or a hint when nothing resolves.
     private static string QuickLinkSubtitle(QuickLink link)
     {
+        // An explicit path is always honoured and shown — used as-is even if it yields a placeholder
+        // icon. A genuinely missing path is still flagged, since that's usually a typo.
         if (!string.IsNullOrWhiteSpace(link.ExePath))
             return File.Exists(link.ExePath) ? link.ExePath : link.ExePath + "   ⚠ file not found";
+
+        // No path: a case-insensitive Start Menu match means the link resolves by name, so leave the
+        // subtitle blank rather than showing a misleading "not found".
+        if (ShellIcon.StartMenuAppExists(link.Name)) return "";
+
+        // A well-known app discovered on disk (installed but not surfaced in the Start Menu).
         var resolved = link.ResolveExe();
         if (resolved != null) return resolved + "  (auto-detected)";
+
         return "Not found — install the app, or Edit to set its path";
     }
 
@@ -1048,7 +1057,9 @@ internal sealed class SettingsForm : Form
             var btn = MakeButton("+ " + preset);
             btn.Click += (_, _) =>
             {
-                _quickLinks.Add(new QuickLink { Name = preset, ExePath = KnownApps.FindByName(preset) ?? "", Enabled = true });
+                // Name-only: the icon and launch resolve through the Start Menu, so it shows the real
+                // logo and stays correct across updates without pinning a path.
+                _quickLinks.Add(new QuickLink { Name = preset, Enabled = true });
                 RebuildQuickLinksList();
                 RaiseQuickLinksChanged();
             };

@@ -1096,11 +1096,15 @@ internal sealed class OverlayForm : Form
         catch { return null; }
     }
 
-    // The icon for a quick link. Prefer the icon Windows shows for the app in the Start Menu (matched
-    // by the link's name) — for Store / MSIX apps that's the real package logo, which the bare alias
-    // exe doesn't carry. Fall back to the icon of the resolved executable, then to drawn initials.
+    // The icon for a quick link. An explicit path takes precedence: we show that program's own icon,
+    // even if it's a placeholder. With no path, prefer the icon Windows shows for the app in the Start
+    // Menu (matched by name) — for Store / MSIX apps that's the real package logo, which the bare alias
+    // exe doesn't carry — then a discovered well-known exe, else null (the strip draws initials).
     private static Bitmap? LoadQuickLinkIcon(QuickLink link, int size)
     {
+        if (!string.IsNullOrWhiteSpace(link.ExePath))
+            return LoadAppIcon(link.ExePath, size);
+
         int px = Math.Max(size, 32);  // render larger than the strip, then downscale for crispness
         using var fromStartMenu = ShellIcon.LoadStartMenuByName(link.Name, px);
         if (fromStartMenu != null) return ScaleTo(fromStartMenu, size);
@@ -1117,7 +1121,9 @@ internal sealed class OverlayForm : Form
         return result;
     }
 
-    // Focuses the app's existing window if it's running, otherwise launches its executable.
+    // Focuses the app's existing window if it's running, otherwise launches it. An explicit path is
+    // launched directly; with no path we launch by Start Menu identity (reliable for Store / MSIX apps
+    // that have no real exe to point at), falling back to a discovered well-known exe.
     private static void LaunchOrFocus(QuickLink link)
     {
         try
@@ -1130,13 +1136,25 @@ internal sealed class OverlayForm : Form
                     return;
                 }
             }
-            var exe = link.ResolveExe();
-            if (exe != null)
+
+            if (!string.IsNullOrWhiteSpace(link.ExePath)) { StartFile(link.ExePath); return; }
+
+            var appId = ShellIcon.StartMenuAppId(link.Name);
+            if (appId != null)
+            {
                 System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true });
+                    new System.Diagnostics.ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{appId}"));
+                return;
+            }
+
+            var exe = link.ResolveExe();
+            if (exe != null) StartFile(exe);
         }
         catch { }
     }
+
+    private static void StartFile(string path) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
 
     private void DrawRow(Graphics g, int rowIdx)
     {

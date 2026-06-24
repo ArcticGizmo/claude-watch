@@ -34,9 +34,26 @@ internal static class ShellIcon
 
     // Renders the icon Windows shows for the app whose Start Menu display name equals (case-
     // insensitively) the given name. Returns null when no app matches or the shell can't produce one.
-    public static Bitmap? LoadStartMenuByName(string? name, int size)
+    public static Bitmap? LoadStartMenuByName(string? name, int size) =>
+        string.IsNullOrWhiteSpace(name)
+            ? null
+            : WithMatchingApp(name, item => item is IShellItemImageFactory f ? ImageFromFactory(f, size) : null);
+
+    // The AppUserModelID of the matching Start Menu app, suitable for launching via
+    // "shell:AppsFolder\<id>". Null when no app matches that display name.
+    public static string? StartMenuAppId(string? name) =>
+        string.IsNullOrWhiteSpace(name)
+            ? null
+            : WithMatchingApp(name, item =>
+                item.GetDisplayName(SIGDN_PARENTRELATIVEPARSING, out IntPtr p) == 0 ? Consume(p) : null);
+
+    // Whether an installed app's Start Menu display name matches (case-insensitively).
+    public static bool StartMenuAppExists(string? name) => StartMenuAppId(name) != null;
+
+    // Enumerates the AppsFolder (the Start Menu's app list) and runs <paramref name="select"/> on the
+    // first item whose display name matches <paramref name="name"/>; returns its result, or null.
+    private static T? WithMatchingApp<T>(string name, Func<IShellItem, T?> select) where T : class
     {
-        if (string.IsNullOrWhiteSpace(name)) return null;
         object? appsObj = null, enumObj = null;
         try
         {
@@ -55,12 +72,9 @@ internal static class ShellIcon
                 try
                 {
                     if (item.GetDisplayName(SIGDN_NORMALDISPLAY, out IntPtr pName) != 0) continue;
-                    string? displayName = Marshal.PtrToStringUni(pName);
-                    Marshal.FreeCoTaskMem(pName);
-
-                    if (string.Equals(displayName, name, StringComparison.OrdinalIgnoreCase) &&
-                        item is IShellItemImageFactory factory)
-                        return ImageFromFactory(factory, size);
+                    string? displayName = Consume(pName);
+                    if (string.Equals(displayName, name, StringComparison.OrdinalIgnoreCase))
+                        return select(item);
                 }
                 finally { Marshal.ReleaseComObject(item); }
             }
@@ -72,6 +86,14 @@ internal static class ShellIcon
             if (enumObj != null) Marshal.ReleaseComObject(enumObj);
             if (appsObj != null) Marshal.ReleaseComObject(appsObj);
         }
+    }
+
+    // Reads and frees a CoTaskMem-allocated LPWSTR returned by GetDisplayName.
+    private static string? Consume(IntPtr pwsz)
+    {
+        var s = Marshal.PtrToStringUni(pwsz);
+        Marshal.FreeCoTaskMem(pwsz);
+        return s;
     }
 
     private static Bitmap? ImageFromFactory(IShellItemImageFactory factory, int size)
@@ -113,6 +135,7 @@ internal static class ShellIcon
     private const int SIIGBF_RESIZETOFIT  = 0x0;
     private const int SIIGBF_ICONONLY     = 0x4;
     private const int SIGDN_NORMALDISPLAY = 0x0;
+    private const int SIGDN_PARENTRELATIVEPARSING = unchecked((int)0x80018001);
 
     // BHID_EnumItems — binds a shell folder item to an enumerator over its children.
     private static readonly Guid BHID_EnumItems = new("94f60519-2850-4924-aa5a-d15e84868039");

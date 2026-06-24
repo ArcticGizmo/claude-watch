@@ -89,17 +89,17 @@ internal sealed class AppSettings
 
     // Seeds QuickLinks the first time (null list), one entry per well-known preset. Each preset is
     // enabled only if its legacy ShowGitKraken/ShowSlack switch was on, so an upgrade preserves the
-    // user's previous choice; a clean install gets both presets present-but-off. The exe path is
-    // discovered now but also re-resolved live at use, so it's fine if it's empty here. The legacy
-    // switches are then dropped so they stop being persisted.
+    // user's previous choice; a clean install gets both presets present-but-off. Presets are name-only
+    // (no pinned path): the icon and launch resolve through the Start Menu, so they show the real logo
+    // and survive app updates. The legacy switches are then dropped so they stop being persisted.
     private void MigrateQuickLinks()
     {
         if (QuickLinks != null) return;
 
         QuickLinks =
         [
-            new QuickLink { Name = "GitKraken", ExePath = KnownApps.FindGitKraken() ?? "", Enabled = ShowGitKraken == true },
-            new QuickLink { Name = "Slack",     ExePath = KnownApps.FindSlack()     ?? "", Enabled = ShowSlack     == true },
+            new QuickLink { Name = "GitKraken", Enabled = ShowGitKraken == true },
+            new QuickLink { Name = "Slack",     Enabled = ShowSlack     == true },
         ];
         ShowGitKraken = null;
         ShowSlack     = null;
