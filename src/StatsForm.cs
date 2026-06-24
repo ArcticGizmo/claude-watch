@@ -268,7 +268,12 @@ internal sealed class StatsForm : Form
             (report.Prompts.ToString(),                 report.Prompts == 1 ? "prompt" : "prompts"),
             (report.ToolCalls.ToString(),               "tool calls"),
         };
-        const int cardH = 70;
+        // Derive the card height from the actual font line heights (not a hard-coded pixel value), so
+        // the big numbers are never clipped at the bottom — see CLAUDE.md (text-clipping rule).
+        int valueH = _bigFont.Height;
+        int labelH = _labelFont.Height;
+        const int cardPadV = 12, cardGapV = 2;
+        int cardH = cardPadV + valueH + cardGapV + labelH + cardPadV;
         int cardW = (innerW - Gap * (cards.Length - 1)) / cards.Length;
         for (int i = 0; i < cards.Length; i++)
         {
@@ -276,8 +281,9 @@ internal sealed class StatsForm : Form
             if (g != null)
             {
                 FillRound(g, new Rectangle(cx, y, cardW, cardH), 8, CardBg);
-                DrawCentered(g, cards[i].value, _bigFont, Theme.Title, new Rectangle(cx, y + 8, cardW, 34));
-                DrawCentered(g, cards[i].label, _labelFont, Theme.Muted, new Rectangle(cx, y + 44, cardW, 18));
+                DrawCentered(g, cards[i].value, _bigFont, Theme.Title, new Rectangle(cx, y + cardPadV, cardW, valueH));
+                DrawCentered(g, cards[i].label, _labelFont, Theme.Muted,
+                    new Rectangle(cx, y + cardPadV + valueH + cardGapV, cardW, labelH));
             }
         }
         y += cardH + 18;
