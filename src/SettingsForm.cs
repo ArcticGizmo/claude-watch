@@ -108,6 +108,9 @@ internal sealed class SettingsForm : Form
     /// full current list so the owning context can persist it and refresh the overlay.</summary>
     public event Action<IReadOnlyList<QuickLink>>? QuickLinksChanged;
 
+    /// <summary>Raised when the user clicks "Open session stats", to open the stats window.</summary>
+    public event Action? OpenStatsRequested;
+
     public SettingsForm(AppSettings settings, UsageMonitor usageMonitor, UsageInfo currentUsage)
     {
         _settings     = settings;
@@ -553,6 +556,12 @@ internal sealed class SettingsForm : Form
         page.Controls.Add(BodyText(
             "Daily activity derived from your Claude Code transcripts — a summary line in the tray menu " +
             "and a full breakdown in the Session stats window (right-click the tray icon → Session stats)."));
+
+        var openRow = ButtonRow();
+        var openBtn = MakeButton("Open session stats…");
+        openBtn.Click += (_, _) => OpenStatsRequested?.Invoke();
+        openRow.Controls.Add(openBtn);
+        page.Controls.Add(openRow);
 
         var trayToggle = MakeToggle();
         trayToggle.Checked = _settings.ShowTodayStatsInTray;

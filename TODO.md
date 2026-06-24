@@ -5,6 +5,11 @@
 - add the ability to manage and customise statuslines
   - this may actually be a separate app, but I would like to be able to get all the information well formatted and swap between them at will
 - Ignore some built in claude commands from showing notification alerts (like /clear /doctor)
+- make a nice gif for the readme
+- add focus handlers for claude processes opened in non-terminal instances
+  - claude itself
+  - VSCode
+  - Rider
 
 ## Quick wins
 - session count badge on tray icon — render active session count as a number overlay on the tray icon

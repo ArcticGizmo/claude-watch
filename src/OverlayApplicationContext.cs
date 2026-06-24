@@ -219,6 +219,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
         _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
         _settingsForm.QuickLinksChanged       += SetQuickLinks;
+        _settingsForm.OpenStatsRequested      += OpenStats;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
