@@ -44,6 +44,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // The history viewer, lazily created on first open and reused while it stays open.
     private HistoryViewerForm? _historyForm;
 
+    // The stats window, lazily created on first open and reused while it stays open.
+    private StatsForm? _statsForm;
+
     // The most recent set of live sessions, so a freshly-opened history viewer knows which sessions
     // are active without waiting for the next scan.
     private IReadOnlyList<ClaudeSession> _sessions = [];
@@ -94,6 +97,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         settingsItem.Click += (_, _) => OpenSettings();
         var historyItem = new ToolStripMenuItem("Session history…");
         historyItem.Click += (_, _) => OpenHistoryViewer(null);
+        var statsItem2 = new ToolStripMenuItem("Session stats…");
+        statsItem2.Click += (_, _) => OpenStats();
         var updateItem = new ToolStripMenuItem("Check for Updates…");
         updateItem.Click += (_, _) => CheckForUpdates();
         var exitItem = new ToolStripMenuItem("Exit Claude Watch");
@@ -104,6 +109,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(settingsItem);
         trayMenu.Items.Add(historyItem);
+        trayMenu.Items.Add(statsItem2);
         trayMenu.Items.Add(updateItem);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
@@ -238,6 +244,26 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _historyForm.SetActiveSessions(_sessions);
         _historyForm.SelectSession(sessionId);
         _historyForm.Activate();
+    }
+
+    // Opens (or re-focuses) the stats window and refreshes today's figures. A single reused instance,
+    // like the settings and history windows.
+    private void OpenStats()
+    {
+        if (_statsForm is { IsDisposed: false })
+        {
+            if (_statsForm.WindowState == FormWindowState.Minimized)
+                _statsForm.WindowState = FormWindowState.Normal;
+            _statsForm.RefreshStats();
+            _statsForm.Activate();
+            _statsForm.BringToFront();
+            return;
+        }
+
+        _statsForm = new StatsForm();
+        _statsForm.FormClosed += (_, _) => _statsForm = null;
+        _statsForm.Show();           // OnShown kicks the first stats load
+        _statsForm.Activate();
     }
 
     // Toggles the usage bars. Disabling stops all polling so no OAuth query ever goes out;
@@ -627,6 +653,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
                 _settingsForm.Close();
             if (_historyForm is { IsDisposed: false })
                 _historyForm.Close();
+            if (_statsForm is { IsDisposed: false })
+                _statsForm.Close();
 
             await mgr.DownloadUpdatesAsync(update);
             mgr.ApplyUpdatesAndRestart(update);
@@ -657,6 +685,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _settingsForm.Close();
         if (_historyForm is { IsDisposed: false })
             _historyForm.Close();
+        if (_statsForm is { IsDisposed: false })
+            _statsForm.Close();
         _overlay.Close();
     }
 
@@ -674,6 +704,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _notifyIcon.Dispose();
             _settingsForm?.Dispose();
             _historyForm?.Dispose();
+            _statsForm?.Dispose();
             _overlay.Dispose();
         }
         base.Dispose(disposing);
