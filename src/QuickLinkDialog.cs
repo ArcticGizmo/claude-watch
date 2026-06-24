@@ -29,7 +29,7 @@ internal sealed class QuickLinkDialog : Form
         BackColor       = Theme.FormBg;
         ForeColor       = Theme.Fg;
         Font            = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
-        ClientSize      = new Size(460, 278);
+        ClientSize      = new Size(460, 300);
 
         const int pad = 16, gap = 8, browseW = 92;
         int innerW = ClientSize.Width - pad * 2;
@@ -47,12 +47,13 @@ internal sealed class QuickLinkDialog : Form
         _nameBox = MakeTextBox(existing?.Name ?? "");
         _nameBox.SetBounds(pad, nameCaption.Bottom + 4, innerW, _nameBox.Height);
 
-        // Live result of the name lookup — sits directly under the Name box.
+        // Live result of the name lookup — sits directly under the Name box. Tall enough to wrap to
+        // multiple lines so the longer "found" message isn't clipped.
         _statusLabel = new Label
         {
             AutoSize  = false,
             ForeColor = Theme.Muted,
-            Bounds    = new Rectangle(pad, _nameBox.Bottom + 5, innerW, 30),
+            Bounds    = new Rectangle(pad, _nameBox.Bottom + 5, innerW, 52),
         };
 
         var pathCaption = Caption("Program (optional)", pad, _statusLabel.Bottom + 6);
