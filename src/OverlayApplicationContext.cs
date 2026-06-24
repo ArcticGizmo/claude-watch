@@ -66,6 +66,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     public OverlayApplicationContext()
     {
         _settings = AppSettings.Load();
+        // Apply the saved active-time idle threshold to the (otherwise static) stats engine.
+        SessionStatsService.IdleThreshold = TimeSpan.FromMinutes(Math.Clamp(_settings.StatsActiveIdleMinutes, 1, 30));
 
         _overlay = new OverlayForm();
         _overlay.FormClosed     += (_, _) => ExitThread();
@@ -260,7 +262,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             return;
         }
 
-        _statsForm = new StatsForm();
+        _statsForm = new StatsForm(_settings);
         _statsForm.FormClosed += (_, _) => _statsForm = null;
         _statsForm.Show();           // OnShown kicks the first stats load
         _statsForm.Activate();
@@ -322,6 +324,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // visible, so it simply refreshes from its previous value a moment after the menu appears.
     private void RefreshTodayStats()
     {
+        if (!_settings.ShowTodayStatsInTray)
+        {
+            _statsItem.Visible = false;
+            return;
+        }
+        _statsItem.Visible = true;
+
         var today = DateOnly.FromDateTime(DateTime.Now);
         Task.Run(() => SessionStatsService.ForDay(today)).ContinueWith(t =>
         {

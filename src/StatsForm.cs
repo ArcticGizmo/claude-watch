@@ -33,13 +33,15 @@ internal sealed class StatsForm : Form
     private readonly Font _labelFont  = new("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
     private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
 
+    private readonly AppSettings _settings;
     private Scope _scope = Scope.Today;
     private StatsReport? _report;       // the totals to render
     private RangeReport? _range;        // non-null for the range scopes (adds trend + records)
     private bool _loading = true;
 
-    public StatsForm()
+    public StatsForm(AppSettings settings)
     {
+        _settings = settings;
         Text          = "Session stats";
         BackColor     = BodyBg;
         ForeColor     = Theme.Fg;
@@ -306,11 +308,14 @@ internal sealed class StatsForm : Form
         y = KeyValueRow(g, "Cache write", StatsFormat.Tokens(tk.CacheWrite), x, y, innerW);
         y = KeyValueRow(g, "Cache read",  StatsFormat.Tokens(tk.CacheRead),  x, y, innerW);
         y = KeyValueRow(g, "Total",       StatsFormat.Tokens(tk.Total),      x, y, innerW, bold: true);
-        y += 6;
-        string cost = report.EstimatedCost > 0
-            ? $"≈ {StatsFormat.Cost(report.EstimatedCost)} equivalent API cost{(report.CostComplete ? "" : " (partial)")}"
-            : "cost unavailable for these models";
-        Draw(g, cost, _labelFont, Theme.Muted, x, y);
+        if (_settings.ShowEstimatedCost)
+        {
+            y += 6;
+            string cost = report.EstimatedCost > 0
+                ? $"≈ {StatsFormat.Cost(report.EstimatedCost)} equivalent API cost{(report.CostComplete ? "" : " (partial)")}"
+                : "cost unavailable for these models";
+            Draw(g, cost, _labelFont, Theme.Muted, x, y);
+        }
         y += 26;
 
         // ── Hourly activity ──

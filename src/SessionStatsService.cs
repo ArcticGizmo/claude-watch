@@ -124,8 +124,10 @@ internal static class SessionStatsService
         ".claude", "projects");
 
     // Gaps longer than this between a session's records are treated as "walked away" and capped, so
-    // active time measures engagement. Matches SessionMonitor's NeedsAttention window (5 minutes).
-    private static readonly TimeSpan IdleThreshold = TimeSpan.FromMinutes(5);
+    // active time measures engagement. Defaults to SessionMonitor's NeedsAttention window (5 minutes);
+    // configurable from settings (see AppSettings.StatsActiveIdleMinutes), applied at startup and when
+    // the user changes it.
+    public static TimeSpan IdleThreshold { get; set; } = TimeSpan.FromMinutes(5);
 
     // A small tail credited after a session's last record, so a single quick exchange (one or two
     // records, no gaps) isn't counted as zero active time.

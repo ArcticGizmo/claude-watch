@@ -63,6 +63,15 @@ internal sealed class AppSettings
     public bool AutoStartOnFirstSession  { get; set; }
     public bool AutoCloseAfterLastSession { get; set; }
 
+    // Session stats. ShowTodayStatsInTray: the "Today: N sessions · Hh Mm active" info line in the tray
+    // right-click menu. ShowEstimatedCost: the equivalent-API-cost figure in the stats window.
+    // StatsActiveIdleMinutes: the idle threshold for the "active time" estimate — gaps between transcript
+    // records longer than this are capped (the user stepped away). Defaults match the original behaviour,
+    // so an older settings file with these keys absent keeps the 5-minute window and both lines on.
+    public bool ShowTodayStatsInTray { get; set; } = true;
+    public bool ShowEstimatedCost    { get; set; } = true;
+    public int  StatsActiveIdleMinutes { get; set; } = 5;
+
     // Quick links. Icons displayed below the usage bars; each opens the app or focuses it. The list
     // is the source of truth; null means "never configured" and triggers a one-time seed (see
     // MigrateQuickLinks) with the well-known presets, honouring the legacy switches below. An empty
