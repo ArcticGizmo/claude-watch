@@ -303,14 +303,26 @@ internal sealed class OverlayForm : Form
     {
         var enabled = links.Where(l => l.Enabled).ToList();
 
-        foreach (var bmp in _quickLinkIcons)
-            bmp?.Dispose();
-        _quickLinkIcons = enabled.Select(l => LoadQuickLinkIcon(l, 18)).ToList();
-        _quickLinks     = enabled;
+        // Icons come from a process-wide cache keyed by (name, path, size). Resolving an app's icon
+        // can be costly (Start Menu lookup), and this runs on every list edit, so unchanged links must
+        // be a cheap cache hit. The cache owns the bitmaps, so we never dispose them here.
+        _quickLinkIcons   = enabled.Select(l => CachedIcon(l, 18)).ToList();
+        _quickLinks       = enabled;
         _hoveredQuickLink = -1;
 
         RelayoutWindow();
         Invalidate();
+    }
+
+    private static readonly Dictionary<string, Bitmap?> _iconCache = new();
+
+    private static Bitmap? CachedIcon(QuickLink link, int size)
+    {
+        string key = $"{link.Name}{link.ExePath}{size}";
+        if (_iconCache.TryGetValue(key, out var cached)) return cached;
+        var icon = LoadQuickLinkIcon(link, size);
+        _iconCache[key] = icon;
+        return icon;
     }
 
     // Whether external (ntfy) notifications are switched on globally. Controls whether the per-session

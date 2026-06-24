@@ -137,6 +137,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.SetUsageEnabled(_settings.ShowUsage);
         _overlay.SetShowExpectedRate(_settings.ShowExpectedUsageRate);
         _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
+        // Warm the (slow, one-off) Start Menu app lookup off the UI thread so the first quick-link
+        // icon load and the Add/Edit dialog don't stall on it.
+        System.Threading.Tasks.Task.Run(ShellIcon.WarmCache);
         _overlay.SetQuickLinks(_settings.QuickLinks ?? []);
         _monitor.Scan();
 

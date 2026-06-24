@@ -33,59 +33,84 @@ internal static class ShellIcon
     }
 
     // Renders the icon Windows shows for the app whose Start Menu display name equals (case-
-    // insensitively) the given name. Returns null when no app matches or the shell can't produce one.
-    public static Bitmap? LoadStartMenuByName(string? name, int size) =>
-        string.IsNullOrWhiteSpace(name)
-            ? null
-            : WithMatchingApp(name, item => item is IShellItemImageFactory f ? ImageFromFactory(f, size) : null);
+    // insensitively) the given name. Resolves the app directly by its cached AUMID, so it doesn't
+    // re-enumerate the (slow, ~1s+) AppsFolder. Null when no app matches or the shell can't render one.
+    public static Bitmap? LoadStartMenuByName(string? name, int size)
+    {
+        var aumid = StartMenuAppId(name);
+        if (aumid == null) return null;
+        object? o = null;
+        try
+        {
+            var iid = typeof(IShellItemImageFactory).GUID;
+            SHCreateItemFromParsingName("shell:AppsFolder\\" + aumid, IntPtr.Zero, ref iid, out o);
+            return o is IShellItemImageFactory f ? ImageFromFactory(f, size) : null;
+        }
+        catch { return null; }
+        finally { if (o != null) Marshal.ReleaseComObject(o); }
+    }
 
     // The AppUserModelID of the matching Start Menu app, suitable for launching via
     // "shell:AppsFolder\<id>". Null when no app matches that display name.
     public static string? StartMenuAppId(string? name) =>
-        string.IsNullOrWhiteSpace(name)
-            ? null
-            : WithMatchingApp(name, item =>
-                item.GetDisplayName(SIGDN_PARENTRELATIVEPARSING, out IntPtr p) == 0 ? Consume(p) : null);
+        !string.IsNullOrWhiteSpace(name) && AppMap().TryGetValue(name.Trim(), out var id) ? id : null;
 
     // Whether an installed app's Start Menu display name matches (case-insensitively).
     public static bool StartMenuAppExists(string? name) => StartMenuAppId(name) != null;
 
-    // Enumerates the AppsFolder (the Start Menu's app list) and runs <paramref name="select"/> on the
-    // first item whose display name matches <paramref name="name"/>; returns its result, or null.
-    private static T? WithMatchingApp<T>(string name, Func<IShellItem, T?> select) where T : class
+    // Builds the Start Menu app map up front (called off the UI thread at startup) so the first
+    // interactive lookup doesn't pay the one-off enumeration cost.
+    public static void WarmCache() { try { AppMap(); } catch { } }
+
+    // Cached display-name → AUMID map of every Start Menu app. Enumerating the AppsFolder is slow
+    // (~1s+), so it's done once and reused for the process lifetime; installs/uninstalls mid-session
+    // aren't picked up until restart, which is an acceptable trade for keeping list edits snappy.
+    private static volatile Dictionary<string, string>? _appMap;
+    private static readonly object _appMapLock = new();
+
+    private static Dictionary<string, string> AppMap()
     {
+        var map = _appMap;
+        if (map != null) return map;
+        lock (_appMapLock)
+            return _appMap ??= BuildAppMap();
+    }
+
+    private static Dictionary<string, string> BuildAppMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         object? appsObj = null, enumObj = null;
         try
         {
             var iidItem = typeof(IShellItem).GUID;
             SHCreateItemFromParsingName("shell:AppsFolder", IntPtr.Zero, ref iidItem, out appsObj);
-            if (appsObj is not IShellItem apps) return null;
+            if (appsObj is not IShellItem apps) return map;
 
             var bhid    = BHID_EnumItems;
             var iidEnum = typeof(IEnumShellItems).GUID;
             if (apps.BindToHandler(IntPtr.Zero, ref bhid, ref iidEnum, out enumObj) != 0 ||
                 enumObj is not IEnumShellItems items)
-                return null;
+                return map;
 
             while (items.Next(1, out var item, out uint fetched) == 0 && fetched == 1)
             {
                 try
                 {
-                    if (item.GetDisplayName(SIGDN_NORMALDISPLAY, out IntPtr pName) != 0) continue;
-                    string? displayName = Consume(pName);
-                    if (string.Equals(displayName, name, StringComparison.OrdinalIgnoreCase))
-                        return select(item);
+                    string? name  = item.GetDisplayName(SIGDN_NORMALDISPLAY,         out IntPtr pN) == 0 ? Consume(pN) : null;
+                    string? aumid = item.GetDisplayName(SIGDN_PARENTRELATIVEPARSING, out IntPtr pId) == 0 ? Consume(pId) : null;
+                    if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(aumid) && !map.ContainsKey(name))
+                        map[name] = aumid;  // keep the first of any duplicate display names
                 }
                 finally { Marshal.ReleaseComObject(item); }
             }
-            return null;
         }
-        catch { return null; }
+        catch { /* return whatever we gathered */ }
         finally
         {
             if (enumObj != null) Marshal.ReleaseComObject(enumObj);
             if (appsObj != null) Marshal.ReleaseComObject(appsObj);
         }
+        return map;
     }
 
     // Reads and frees a CoTaskMem-allocated LPWSTR returned by GetDisplayName.
