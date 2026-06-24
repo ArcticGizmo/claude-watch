@@ -108,6 +108,9 @@ internal sealed class SettingsForm : Form
     /// full current list so the owning context can persist it and refresh the overlay.</summary>
     public event Action<IReadOnlyList<QuickLink>>? QuickLinksChanged;
 
+    /// <summary>Raised when the user clicks "Open session stats", to open the stats window.</summary>
+    public event Action? OpenStatsRequested;
+
     public SettingsForm(AppSettings settings, UsageMonitor usageMonitor, UsageInfo currentUsage)
     {
         _settings     = settings;
@@ -163,6 +166,7 @@ internal sealed class SettingsForm : Form
         AddPage("start",        "Getting started", BuildGettingStartedPage);
         AddPage("plugin",       "Plugin Control",  BuildPluginPage);
         AddPage("usage",        "Usage Limits",    BuildUsagePage);
+        AddPage("stats",        "Session Stats",   BuildStatsPage);
         AddPage("notify",       "Notifications",   BuildNotificationsPage);
         AddPage("auto",         "Automation",      BuildAutomationPage);
         AddPage("quicklinks",   "Quick Links",      BuildQuickLinksPage);
@@ -543,6 +547,90 @@ internal sealed class SettingsForm : Form
         };
         row.Controls.Add(_usageRefreshBtn);
         page.Controls.Add(row);
+    }
+
+    // ── Session Stats ────────────────────────────────────────────────────────────────
+    private void BuildStatsPage(FlowLayoutPanel page)
+    {
+        page.Controls.Add(SectionTitle("Session stats"));
+        page.Controls.Add(BodyText(
+            "Daily activity derived from your Claude Code transcripts — a summary line in the tray menu " +
+            "and a full breakdown in the Session stats window (right-click the tray icon → Session stats)."));
+
+        var openRow = ButtonRow();
+        var openBtn = MakeButton("Open session stats…");
+        openBtn.Click += (_, _) => OpenStatsRequested?.Invoke();
+        openRow.Controls.Add(openBtn);
+        page.Controls.Add(openRow);
+
+        var trayToggle = MakeToggle();
+        trayToggle.Checked = _settings.ShowTodayStatsInTray;
+        trayToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.ShowTodayStatsInTray = trayToggle.Checked;
+            _settings.Save();
+        };
+        page.Controls.Add(TitleRow("Show today's summary in the tray menu", trayToggle));
+
+        var costToggle = MakeToggle();
+        costToggle.Checked = _settings.ShowEstimatedCost;
+        costToggle.CheckedChanged += (_, _) =>
+        {
+            _settings.ShowEstimatedCost = costToggle.Checked;
+            _settings.Save();
+        };
+        page.Controls.Add(TitleRow("Show estimated cost", costToggle));
+        page.Controls.Add(BodyText(
+            "Shows an \"equivalent API cost\" in the stats window — what the tokens would have cost on " +
+            "pay-as-you-go API pricing, using built-in per-model rates. It's a usage-intensity signal, " +
+            "not a bill (subscription usage isn't billed per token)."));
+
+        page.Controls.Add(Separator());
+
+        page.Controls.Add(SectionTitle("Active-time idle threshold"));
+        page.Controls.Add(BodyText(
+            "\"Active\" time is estimated from the gaps between transcript records. A gap longer than this " +
+            "counts as you having stepped away, and is capped at the threshold. Default 5 minutes."));
+        page.Controls.Add(BuildIdleStepper());
+    }
+
+    // A "−  N min  +" stepper for the active-time idle threshold (clamped 1–30 minutes). Persists the
+    // value and pushes it straight to the stats engine so it takes effect immediately.
+    private Panel BuildIdleStepper()
+    {
+        const int min = 1, max = 30;
+        var row = ButtonRow();
+        var dec = MakeButton("−");
+        var inc = MakeButton("+");
+        var value = new Label
+        {
+            AutoSize  = false,
+            Width     = 72,
+            Height    = 30,
+            TextAlign = ContentAlignment.MiddleCenter,
+            ForeColor = Theme.Fg,
+            Font      = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point),
+            Margin    = new Padding(0, 0, 8, 0),
+        };
+
+        void Render() => value.Text = $"{_settings.StatsActiveIdleMinutes} min";
+        void Apply(int v)
+        {
+            v = Math.Clamp(v, min, max);
+            if (v == _settings.StatsActiveIdleMinutes) return;
+            _settings.StatsActiveIdleMinutes = v;
+            _settings.Save();
+            SessionStatsService.IdleThreshold = TimeSpan.FromMinutes(v);
+            Render();
+        }
+        dec.Click += (_, _) => Apply(_settings.StatsActiveIdleMinutes - 1);
+        inc.Click += (_, _) => Apply(_settings.StatsActiveIdleMinutes + 1);
+        Render();
+
+        row.Controls.Add(dec);
+        row.Controls.Add(value);
+        row.Controls.Add(inc);
+        return row;
     }
 
     // ── Notifications (Windows desktop + external ntfy) ──────────────────────────────

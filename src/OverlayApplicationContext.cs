@@ -32,6 +32,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon;
     private readonly AppSettings _settings;
 
+    // The tray menu's "Today: N sessions · Hh Mm active" info line, refreshed each time the menu opens.
+    private readonly ToolStripMenuItem _statsItem;
+
     // Tracks workstation lock state so the AFK override can push any session's alert while locked.
     private readonly LockMonitor _lockMonitor = new();
 
@@ -40,6 +43,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     // The history viewer, lazily created on first open and reused while it stays open.
     private HistoryViewerForm? _historyForm;
+
+    // The stats window, lazily created on first open and reused while it stays open.
+    private StatsForm? _statsForm;
 
     // The most recent set of live sessions, so a freshly-opened history viewer knows which sessions
     // are active without waiting for the next scan.
@@ -60,6 +66,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     public OverlayApplicationContext()
     {
         _settings = AppSettings.Load();
+        // Apply the saved active-time idle threshold to the (otherwise static) stats engine.
+        SessionStatsService.IdleThreshold = TimeSpan.FromMinutes(Math.Clamp(_settings.StatsActiveIdleMinutes, 1, 30));
 
         _overlay = new OverlayForm();
         _overlay.FormClosed     += (_, _) => ExitThread();
@@ -81,22 +89,35 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         var trayMenu = new ContextMenuStrip();
 
         var header = new ToolStripMenuItem($"Claude Watch — v{AppInfo.Version}") { Enabled = false };
+        // Today's headline stats (sessions + active time), refreshed each time the menu opens. Disabled
+        // so it reads as an info line, not a command.
+        _statsItem = new ToolStripMenuItem(DayStats.Empty(DateOnly.FromDateTime(DateTime.Now)).TraySummary())
+        {
+            Enabled = false,
+        };
         var settingsItem = new ToolStripMenuItem("Settings…");
         settingsItem.Click += (_, _) => OpenSettings();
         var historyItem = new ToolStripMenuItem("Session history…");
         historyItem.Click += (_, _) => OpenHistoryViewer(null);
+        var statsItem2 = new ToolStripMenuItem("Session stats…");
+        statsItem2.Click += (_, _) => OpenStats();
         var updateItem = new ToolStripMenuItem("Check for Updates…");
         updateItem.Click += (_, _) => CheckForUpdates();
         var exitItem = new ToolStripMenuItem("Exit Claude Watch");
         exitItem.Click += (_, _) => Exit();
 
         trayMenu.Items.Add(header);
+        trayMenu.Items.Add(_statsItem);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(settingsItem);
         trayMenu.Items.Add(historyItem);
+        trayMenu.Items.Add(statsItem2);
         trayMenu.Items.Add(updateItem);
         trayMenu.Items.Add(new ToolStripSeparator());
         trayMenu.Items.Add(exitItem);
+        // Recompute today's stats just before the menu shows; the scan runs off the UI thread and the
+        // line updates in place a moment later (it's already visible by then).
+        trayMenu.Opening += (_, _) => RefreshTodayStats();
         _notifyIcon.ContextMenuStrip = trayMenu;
 
         _monitor = new SessionMonitor();
@@ -198,6 +219,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
         _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
         _settingsForm.QuickLinksChanged       += SetQuickLinks;
+        _settingsForm.OpenStatsRequested      += OpenStats;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
         _settingsForm.Activate();
@@ -225,6 +247,26 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _historyForm.SetActiveSessions(_sessions);
         _historyForm.SelectSession(sessionId);
         _historyForm.Activate();
+    }
+
+    // Opens (or re-focuses) the stats window and refreshes today's figures. A single reused instance,
+    // like the settings and history windows.
+    private void OpenStats()
+    {
+        if (_statsForm is { IsDisposed: false })
+        {
+            if (_statsForm.WindowState == FormWindowState.Minimized)
+                _statsForm.WindowState = FormWindowState.Normal;
+            _statsForm.RefreshStats();
+            _statsForm.Activate();
+            _statsForm.BringToFront();
+            return;
+        }
+
+        _statsForm = new StatsForm(_settings);
+        _statsForm.FormClosed += (_, _) => _statsForm = null;
+        _statsForm.Show();           // OnShown kicks the first stats load
+        _statsForm.Activate();
     }
 
     // Toggles the usage bars. Disabling stops all polling so no OAuth query ever goes out;
@@ -276,6 +318,32 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         }
         catch (ObjectDisposedException) { }
         catch (InvalidOperationException) { }
+    }
+
+    // Recomputes today's headline stats off the UI thread (scanning transcripts can touch several
+    // files) and updates the tray menu's info line in place. Fired on menu-open; the line is already
+    // visible, so it simply refreshes from its previous value a moment after the menu appears.
+    private void RefreshTodayStats()
+    {
+        if (!_settings.ShowTodayStatsInTray)
+        {
+            _statsItem.Visible = false;
+            return;
+        }
+        _statsItem.Visible = true;
+
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        Task.Run(() => SessionStatsService.ForDay(today)).ContinueWith(t =>
+        {
+            var stats = t.IsCompletedSuccessfully ? t.Result : DayStats.Empty(today);
+            try
+            {
+                if (_overlay.IsHandleCreated && !_overlay.IsDisposed)
+                    _overlay.BeginInvoke((Action)(() => _statsItem.Text = stats.TraySummary()));
+            }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+        });
     }
 
     private void OnSessionsChanged(IReadOnlyList<ClaudeSession> sessions)
@@ -595,6 +663,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
                 _settingsForm.Close();
             if (_historyForm is { IsDisposed: false })
                 _historyForm.Close();
+            if (_statsForm is { IsDisposed: false })
+                _statsForm.Close();
 
             await mgr.DownloadUpdatesAsync(update);
             mgr.ApplyUpdatesAndRestart(update);
@@ -625,6 +695,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _settingsForm.Close();
         if (_historyForm is { IsDisposed: false })
             _historyForm.Close();
+        if (_statsForm is { IsDisposed: false })
+            _statsForm.Close();
         _overlay.Close();
     }
 
@@ -642,6 +714,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             _notifyIcon.Dispose();
             _settingsForm?.Dispose();
             _historyForm?.Dispose();
+            _statsForm?.Dispose();
             _overlay.Dispose();
         }
         base.Dispose(disposing);
