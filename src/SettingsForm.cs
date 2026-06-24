@@ -92,6 +92,9 @@ internal sealed class SettingsForm : Form
     /// <summary>Raised when the user toggles "Show expected rate marker" (true = enabled).</summary>
     public event Action<bool>? ExpectedRateChanged;
 
+    /// <summary>Raised when the user toggles "Show context pressure" (true = enabled).</summary>
+    public event Action<bool>? ContextPressureChanged;
+
     /// <summary>Raised when the user clicks "Check for Updates".</summary>
     public event EventHandler? CheckForUpdatesRequested;
 
@@ -166,6 +169,7 @@ internal sealed class SettingsForm : Form
         AddPage("start",        "Getting started", BuildGettingStartedPage);
         AddPage("plugin",       "Plugin Control",  BuildPluginPage);
         AddPage("usage",        "Usage Limits",    BuildUsagePage);
+        AddPage("context",      "Context",         BuildContextPage);
         AddPage("stats",        "Session Stats",   BuildStatsPage);
         AddPage("notify",       "Notifications",   BuildNotificationsPage);
         AddPage("auto",         "Automation",      BuildAutomationPage);
@@ -547,6 +551,23 @@ internal sealed class SettingsForm : Form
         };
         row.Controls.Add(_usageRefreshBtn);
         page.Controls.Add(row);
+    }
+
+    // ── Context ───────────────────────────────────────────────────────────────────────
+    private void BuildContextPage(FlowLayoutPanel page)
+    {
+        var toggle = MakeToggle();
+        toggle.Checked = _settings.ShowContextPressure;
+        toggle.CheckedChanged += (_, _) => ContextPressureChanged?.Invoke(toggle.Checked);
+        page.Controls.Add(TitleRow("Context pressure", toggle));
+
+        page.Controls.Add(BodyText(
+            "Warns when a session is filling up its context window. A small thermometer appears next " +
+            "to the session in the overlay once it crosses the halfway mark, filling up and warming " +
+            "from amber to red as the window approaches full."));
+        page.Controls.Add(BodyText(
+            "The window size is read from the model the session is running — the 1M-token beta is " +
+            "recognised as such — so the gauge reflects the real headroom, not a fixed limit."));
     }
 
     // ── Session Stats ────────────────────────────────────────────────────────────────

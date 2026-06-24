@@ -161,6 +161,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.Show();
         _overlay.SetUsageEnabled(_settings.ShowUsage);
         _overlay.SetShowExpectedRate(_settings.ShowExpectedUsageRate);
+        _overlay.SetShowContextPressure(_settings.ShowContextPressure);
         _overlay.SetExternalNotificationsAvailable(_settings.ExternalNotificationsEnabled);
         // Warm the (slow, one-off) Start Menu app lookup off the UI thread so the first quick-link
         // icon load and the Add/Edit dialog don't stall on it.
@@ -218,6 +219,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm = new SettingsForm(_settings, _usageMonitor, _lastUsage);
         _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
         _settingsForm.ExpectedRateChanged    += SetExpectedRateEnabled;
+        _settingsForm.ContextPressureChanged += SetContextPressureEnabled;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
         _settingsForm.TestNotificationRequested += ShowTestNotification;
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
@@ -301,6 +303,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settings.ShowExpectedUsageRate = enabled;
         _settings.Save();
         _overlay.SetShowExpectedRate(enabled);
+    }
+
+    private void SetContextPressureEnabled(bool enabled)
+    {
+        if (_settings.ShowContextPressure == enabled) return;
+        _settings.ShowContextPressure = enabled;
+        _settings.Save();
+        _overlay.SetShowContextPressure(enabled);
     }
 
     // Fetches usage off the UI thread, then pushes the result back onto it for rendering in both

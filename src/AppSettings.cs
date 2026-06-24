@@ -18,6 +18,11 @@ internal sealed class AppSettings
     // at ~28%). Defaults to true; only visible while ShowUsage is also true.
     public bool ShowExpectedUsageRate { get; set; } = true;
 
+    // Whether to surface per-session context-window pressure — the thermometer glyph that appears on
+    // a session row once its context fill crosses the warning threshold. Off hides the glyph entirely
+    // (the fill is still computed; it just isn't drawn). Defaults to true; a missing key keeps it on.
+    public bool ShowContextPressure { get; set; } = true;
+
     // Master switch for Windows desktop (toast/balloon) notifications and chimes. When off, no
     // session balloon is ever shown and no chime is played; the overlay's own attention flash is
     // unaffected. The per-type switches below only take effect while this is on.

@@ -108,6 +108,7 @@ internal sealed class OverlayForm : Form
     private UsageInfo _usage = UsageInfo.Empty;
     private bool _usageEnabled = true;
     private bool _showExpectedRate = true;
+    private bool _showContextPressure = true;
     private bool _inUsageStrip;
     private readonly UsageTooltipForm _usageTooltip = new();
 
@@ -295,6 +296,13 @@ internal sealed class OverlayForm : Form
     {
         if (_showExpectedRate == show) return;
         _showExpectedRate = show;
+        Invalidate();
+    }
+
+    public void SetShowContextPressure(bool show)
+    {
+        if (_showContextPressure == show) return;
+        _showContextPressure = show;
         Invalidate();
     }
 
@@ -1281,7 +1289,7 @@ internal sealed class OverlayForm : Form
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
         int rcWidth      = session.RemoteControlled ? RcIconWidth : 0;
         float ctxFill    = session.ContextFill ?? 0f;
-        int thermoWidth  = ctxFill >= 0.50f ? ThermoIconWidth + 2 : 0;  // icon + 2 px gap right
+        int thermoWidth  = _showContextPressure && ctxFill >= 0.50f ? ThermoIconWidth + 2 : 0;  // icon + 2 px gap right
         var statusSz     = g.MeasureString(statusText, statusFont);
         int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth - thermoWidth;
         var nameTrunc    = TruncateString(g, session.DisplayName, nameFont, nameMaxWidth);
@@ -1296,20 +1304,6 @@ internal sealed class OverlayForm : Form
 
         g.DrawString(nameTrunc, nameFont, fgBrush,
             HorizPad + 14 + mailWidth + rcWidth, nameMidY - nameSz.Height / 2);
-
-        // DEBUG: context window size + fill next to the session name — remove when verified.
-        {
-            string win = session.ContextWindow >= ModelContext.ExtendedWindow ? "1M" : "200k";
-            string dbg = session.ContextFill is { } cf
-                ? $" [{win} · {(int)(cf * 100)}%]"
-                : $" [{win}]";
-            using var dbgBrush = new SolidBrush(Color.FromArgb(130, 255, 210, 60));
-            using var dbgFont  = new Font("Segoe UI", 7f, GraphicsUnit.Point);
-            var dbgSz = g.MeasureString(dbg, dbgFont);
-            g.DrawString(dbg, dbgFont, dbgBrush,
-                HorizPad + 14 + mailWidth + rcWidth + nameSz.Width,
-                nameMidY - dbgSz.Height / 2);
-        }
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
