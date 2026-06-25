@@ -1,6 +1,7 @@
 namespace ClaudeWatch;
 
 using System.Drawing.Drawing2D;
+using ClaudeWatch.Ui;
 
 /// <summary>Shared dark palette for the settings window and its custom controls. Mirrors the
 /// overlay's colours so the two surfaces read as one app.</summary>
@@ -275,7 +276,7 @@ internal sealed class UsageBarsControl : Control
 
         Color trackColor = stale ? Theme.Blend(Theme.Track, BackColor, 0.4f) : Theme.Track;
         using (var trackBrush = new SolidBrush(trackColor))
-            FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
+            PaintKit.FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
 
         string pctText;
         Color textColor;
@@ -288,7 +289,7 @@ internal sealed class UsageBarsControl : Control
             int fillW = (int)Math.Round(trackW * clamped / 100.0);
             if (fillW > 0)
                 using (var fillBrush = new SolidBrush(barColor))
-                    FillRoundedBar(g, fillBrush, trackLeft, trackY, fillW, TrackH);
+                    PaintKit.FillRoundedBar(g, fillBrush, trackLeft, trackY, fillW, TrackH);
 
             pctText   = $"{(int)Math.Round(clamped)}%";
             textColor = barColor;
@@ -320,20 +321,6 @@ internal sealed class UsageBarsControl : Control
         return Math.Clamp(elapsed.TotalSeconds / window.TotalSeconds * 100.0, 0, 100);
     }
 
-    private static void FillRoundedBar(Graphics g, Brush brush, int x, int y, int w, int h)
-    {
-        if (w <= 0) return;
-        int r = Math.Min(h / 2, w / 2);
-        if (r <= 0) { g.FillRectangle(brush, x, y, w, h); return; }
-        using var path = new GraphicsPath();
-        int d = r * 2;
-        path.AddArc(x, y, d, d, 180, 90);
-        path.AddArc(x + w - d, y, d, d, 270, 90);
-        path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
-        path.AddArc(x, y + h - d, d, d, 90, 90);
-        path.CloseFigure();
-        g.FillPath(brush, path);
-    }
 }
 
 /// <summary>A legend listing each permission mode with the coloured fast-forward badge the
@@ -535,7 +522,7 @@ internal sealed class ContextThresholdSlider : Control
         int xy = XFor(_yellow), xo = XFor(_orange), xr = XFor(_red);
 
         // Clip to a rounded track so the outer ends are capped but the internal band joins stay crisp.
-        using (var clip = RoundedPath(new Rectangle(left, TrackY, TrackW, TrackH), TrackH / 2))
+        using (var clip = PaintKit.RoundedRect(new Rectangle(left, TrackY, TrackW, TrackH), TrackH / 2))
         {
             g.SetClip(clip);
             FillSpan(g, left, xy,    TrackY, hidden);
@@ -574,18 +561,5 @@ internal sealed class ContextThresholdSlider : Control
         using var pen = new Pen(Color.FromArgb(120, 0, 0, 0), 1f);
         g.FillEllipse(fb, rect);
         g.DrawEllipse(pen, rect);
-    }
-
-    private static GraphicsPath RoundedPath(Rectangle r, int radius)
-    {
-        int d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
-        var p = new GraphicsPath();
-        if (d <= 0) { p.AddRectangle(r); return p; }
-        p.AddArc(r.X, r.Y, d, d, 180, 90);
-        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        p.CloseFigure();
-        return p;
     }
 }

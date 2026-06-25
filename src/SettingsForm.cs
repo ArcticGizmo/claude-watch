@@ -2,6 +2,7 @@ namespace ClaudeWatch;
 
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using ClaudeWatch.Ui;
 
 /// <summary>
 /// First-class settings window opened by left-clicking the tray icon. A dark-themed window split
@@ -23,7 +24,7 @@ internal sealed class SettingsForm : Form
     private readonly AppSettings  _settings;
     private readonly UsageMonitor _usageMonitor;
 
-    private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+    private readonly Bitmap? _icon = EmbeddedResources.LoadBitmap("ClaudeWatch.icon.png");
 
     // Shell.
     private FlowLayoutPanel _navPanel    = null!;
@@ -1333,7 +1334,7 @@ internal sealed class SettingsForm : Form
     // headings, bullet lists, blockquotes, thematic breaks, and inline emphasis/links.
     private void BuildChangelogPage(FlowLayoutPanel page)
     {
-        string? markdown = LoadEmbeddedText("ClaudeWatch.CHANGELOG.md");
+        string? markdown = EmbeddedResources.LoadText("ClaudeWatch.CHANGELOG.md");
         if (markdown is null)
         {
             page.Controls.Add(BodyText("Changelog not available."));
@@ -1576,32 +1577,10 @@ internal sealed class SettingsForm : Form
         return l;
     }
 
-    private static string? LoadEmbeddedText(string resourceName)
-    {
-        try
-        {
-            using var stream = typeof(SettingsForm).Assembly.GetManifestResourceStream(resourceName);
-            if (stream is null) return null;
-            using var reader = new StreamReader(stream);
-            return reader.ReadToEnd();
-        }
-        catch { return null; }
-    }
-
     private static void OpenUrl(string url)
     {
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
         catch { }
-    }
-
-    private static Bitmap? LoadEmbeddedBitmap(string resourceName)
-    {
-        try
-        {
-            using var stream = typeof(SettingsForm).Assembly.GetManifestResourceStream(resourceName);
-            return stream != null ? new Bitmap(stream) : null;
-        }
-        catch { return null; }
     }
 
     protected override void Dispose(bool disposing)

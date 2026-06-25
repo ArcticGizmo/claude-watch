@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using ClaudeWatch.Ui;
 
 namespace ClaudeWatch;
 
@@ -31,7 +32,7 @@ internal sealed class StatsForm : Form
     private readonly Font _h2Font     = new("Segoe UI", 11f, FontStyle.Bold, GraphicsUnit.Point);
     private readonly Font _bodyFont   = new("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point);
     private readonly Font _labelFont  = new("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
-    private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+    private readonly Bitmap? _icon = EmbeddedResources.LoadBitmap("ClaudeWatch.icon.png");
 
     private readonly AppSettings _settings;
     private Scope _scope = Scope.Today;
@@ -282,7 +283,7 @@ internal sealed class StatsForm : Form
             int cx = x + i * (cardW + Gap);
             if (g != null)
             {
-                FillRound(g, new Rectangle(cx, y, cardW, cardH), 8, CardBg);
+                PaintKit.FillRoundedRect(g, CardBg, new Rectangle(cx, y, cardW, cardH), 8);
                 DrawCentered(g, cards[i].value, _bigFont, Theme.Title, new Rectangle(cx, y + cardPadV, cardW, valueH));
                 DrawCentered(g, cards[i].label, _labelFont, Theme.Muted,
                     new Rectangle(cx, y + cardPadV + valueH + cardGapV, cardW, labelH));
@@ -420,10 +421,10 @@ internal sealed class StatsForm : Form
         if (g != null)
         {
             var track = new Rectangle(x, y + 3, innerW, rowH - 8);
-            FillRound(g, track, 5, Theme.Track);
+            PaintKit.FillRoundedRect(g, Theme.Track, track, 5);
             int barW = (int)(innerW * Math.Clamp(value / (double)max, 0, 1));
             if (barW > 4)
-                FillRound(g, new Rectangle(x, y + 3, barW, rowH - 8), 5, color);
+                PaintKit.FillRoundedRect(g, color, new Rectangle(x, y + 3, barW, rowH - 8), 5);
 
             TextRenderer.DrawText(g, label, _bodyFont, new Rectangle(x + 8, y, innerW - 100, rowH), Theme.Title,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
@@ -448,7 +449,7 @@ internal sealed class StatsForm : Form
                 int bh = (int)(areaH * (hourly[hr] / (double)max));
                 if (bh < 2 && hourly[hr] > 0) bh = 2;
                 if (bh > 0)
-                    FillRound(g, new Rectangle(bx, y + (areaH - bh), bw, bh), 2, Theme.Accent);
+                    PaintKit.FillRoundedRect(g, Theme.Accent, new Rectangle(bx, y + (areaH - bh), bw, bh), 2);
             }
             using var pen = new Pen(Theme.Border);
             g.DrawLine(pen, x, y + areaH + 1, x + innerW, y + areaH + 1);
@@ -477,7 +478,7 @@ internal sealed class StatsForm : Form
                 int bh = (int)(areaH * (sec / (double)max));
                 if (bh < 2 && sec > 0) bh = 2;
                 if (bh > 0)
-                    FillRound(g, new Rectangle(bx, y + (areaH - bh), bw, bh), 2, Theme.Accent);
+                    PaintKit.FillRoundedRect(g, Theme.Accent, new Rectangle(bx, y + (areaH - bh), bw, bh), 2);
             }
             using var pen = new Pen(Theme.Border);
             g.DrawLine(pen, x, y + areaH + 1, x + innerW, y + areaH + 1);
@@ -488,37 +489,6 @@ internal sealed class StatsForm : Form
                 TextFormatFlags.Right | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
         return y + areaH + 24;
-    }
-
-    private static void FillRound(Graphics g, Rectangle r, int radius, Color color)
-    {
-        if (r.Width <= 0 || r.Height <= 0) return;
-        int d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
-        using var path = new GraphicsPath();
-        if (d <= 1)
-        {
-            path.AddRectangle(r);
-        }
-        else
-        {
-            path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-            path.CloseFigure();
-        }
-        using var brush = new SolidBrush(color);
-        g.FillPath(brush, path);
-    }
-
-    private static Bitmap? LoadEmbeddedBitmap(string resourceName)
-    {
-        try
-        {
-            using var stream = typeof(StatsForm).Assembly.GetManifestResourceStream(resourceName);
-            return stream != null ? new Bitmap(stream) : null;
-        }
-        catch { return null; }
     }
 
     protected override void Dispose(bool disposing)

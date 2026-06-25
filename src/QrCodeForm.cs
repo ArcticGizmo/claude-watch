@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using ClaudeWatch.Ui;
 using QRCoder;
 
 namespace ClaudeWatch;
@@ -142,7 +143,7 @@ internal sealed class QrCodeForm : Form
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
         var bounds = new Rectangle(0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
-        using (var path = RoundedRect(bounds, Corner))
+        using (var path = PaintKit.RoundedRect(bounds, Corner))
         {
             using var bg = new SolidBrush(BgColor);
             g.FillPath(bg, path);
@@ -167,7 +168,7 @@ internal sealed class QrCodeForm : Form
                 new RectangleF(Pad, Pad, ClientSize.Width - Pad * 2, TitleH), center);
 
         // White card holding the QR, with the code centered inside its quiet-zone margin.
-        using (var cardPath = RoundedRect(_cardRect, 8))
+        using (var cardPath = PaintKit.RoundedRect(_cardRect, 8))
         using (var white = new SolidBrush(Color.White))
             g.FillPath(white, cardPath);
 
@@ -192,7 +193,7 @@ internal sealed class QrCodeForm : Form
 
     private static void DrawButton(Graphics g, Rectangle r, string text, bool hover, Font font, StringFormat fmt)
     {
-        using (var path = RoundedRect(r, 6))
+        using (var path = PaintKit.RoundedRect(r, 6))
         {
             using var bg = new SolidBrush(hover ? BtnHoverCol : BtnColor);
             g.FillPath(bg, path);
@@ -270,18 +271,6 @@ internal sealed class QrCodeForm : Form
     {
         base.OnDeactivate(e);
         Close();
-    }
-
-    private static GraphicsPath RoundedRect(Rectangle r, int radius)
-    {
-        int d = radius * 2;
-        var p = new GraphicsPath();
-        p.AddArc(r.X,         r.Y,          d, d, 180, 90);
-        p.AddArc(r.Right - d, r.Y,          d, d, 270, 90);
-        p.AddArc(r.Right - d, r.Bottom - d, d, d,   0, 90);
-        p.AddArc(r.X,         r.Bottom - d, d, d,  90, 90);
-        p.CloseFigure();
-        return p;
     }
 
     protected override void Dispose(bool disposing)

@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using ClaudeWatch.Data;
+using ClaudeWatch.Ui;
 
 namespace ClaudeWatch;
 
@@ -152,7 +153,7 @@ internal sealed class OverlayForm : Form
     private int _autoCloseDurationMs;
 
     // The claude-watch icon, shown atop the dense strip purely for flair. Null if unavailable.
-    private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+    private readonly Bitmap? _icon = EmbeddedResources.LoadBitmap("ClaudeWatch.icon.png");
 
     // Is the full session body (usage bars + rows) currently on screen? In floating mode that's
     // the expanded state; in dense mode it's the hover-opened popup.
@@ -639,7 +640,7 @@ internal sealed class OverlayForm : Form
         g.TextRenderingHint  = TextRenderingHint.ClearTypeGridFit;
 
         var bounds = new Rectangle(0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
-        using var path = RoundedRect(bounds, Corner);
+        using var path = PaintKit.RoundedRect(bounds, Corner);
 
         using (var bg = new SolidBrush(BgColor))
             g.FillPath(bg, path);
@@ -688,7 +689,7 @@ internal sealed class OverlayForm : Form
         int fillW = (int)Math.Round(w * frac);
         if (fillW > 0)
             using (var fill = new SolidBrush(IdleColor))
-                FillRoundedBar(g, fill, left, y, fillW, TrackH);
+                PaintKit.FillRoundedBar(g, fill, left, y, fillW, TrackH);
     }
 
     private void DrawHeader(Graphics g)
@@ -917,22 +918,12 @@ internal sealed class OverlayForm : Form
         var upperLeft  = new Rectangle(x,          top,          side, side);
         var lowerRight = new Rectangle(x + offset, top + offset, side, side);
 
-        using (var p1 = RoundedRect(upperLeft, radius))
+        using (var p1 = PaintKit.RoundedRect(upperLeft, radius))
             g.DrawPath(pen, p1);
-        using (var p2 = RoundedRect(lowerRight, radius))
+        using (var p2 = PaintKit.RoundedRect(lowerRight, radius))
             g.DrawPath(pen, p2);
 
         g.SmoothingMode = oldSmoothing;
-    }
-
-    private static Bitmap? LoadEmbeddedBitmap(string resourceName)
-    {
-        try
-        {
-            using var stream = typeof(OverlayForm).Assembly.GetManifestResourceStream(resourceName);
-            return stream != null ? new Bitmap(stream) : null;
-        }
-        catch { return null; }
     }
 
     // ── Usage bars ─────────────────────────────────────────────────────────────
@@ -977,7 +968,7 @@ internal sealed class OverlayForm : Form
 
         Color trackColor = stale ? Blend(UsageTrackColor, BgColor, 0.4f) : UsageTrackColor;
         using (var trackBrush = new SolidBrush(trackColor))
-            FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
+            PaintKit.FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
 
         // Fill + percentage text
         string pctText;
@@ -991,7 +982,7 @@ internal sealed class OverlayForm : Form
             int fillW = (int)Math.Round(trackW * clamped / 100.0);
             if (fillW > 0)
                 using (var fillBrush = new SolidBrush(barColor))
-                    FillRoundedBar(g, fillBrush, trackLeft, trackY, fillW, TrackH);
+                    PaintKit.FillRoundedBar(g, fillBrush, trackLeft, trackY, fillW, TrackH);
 
             pctText   = $"{(int)Math.Round(clamped)}%";
             textColor = barColor;
@@ -1039,15 +1030,6 @@ internal sealed class OverlayForm : Form
         (int)(a.R * (1 - t) + b.R * t),
         (int)(a.G * (1 - t) + b.G * t),
         (int)(a.B * (1 - t) + b.B * t));
-
-    private static void FillRoundedBar(Graphics g, Brush brush, int x, int y, int w, int h)
-    {
-        if (w <= 0) return;
-        int r = Math.Min(h / 2, w / 2);
-        if (r <= 0) { g.FillRectangle(brush, x, y, w, h); return; }
-        using var path = RoundedRect(new Rectangle(x, y, w, h), r);
-        g.FillPath(brush, path);
-    }
 
     // ── Quick links row ───────────────────────────────────────────────────────
     // Draws the enabled quick-link icons side-by-side, centred horizontally. Each slot shows its
@@ -1488,7 +1470,7 @@ internal sealed class OverlayForm : Form
         using var outlinePen   = new Pen(Color.FromArgb(80,  255, 255, 255), 1f);
 
         // Glass background.
-        using var tubePath = RoundedRect(tube, 2);
+        using var tubePath = PaintKit.RoundedRect(tube, 2);
         g.FillPath(dimBrush, tubePath);
         g.FillEllipse(dimBrush, bulb);
 
@@ -1517,18 +1499,6 @@ internal sealed class OverlayForm : Form
         while (text.Length > 0 && g.MeasureString(text + "…", font).Width > maxWidth)
             text = text[..^1];
         return text + "…";
-    }
-
-    private static GraphicsPath RoundedRect(Rectangle r, int radius)
-    {
-        int d = radius * 2;
-        var p = new GraphicsPath();
-        p.AddArc(r.X,         r.Y,          d, d, 180, 90);
-        p.AddArc(r.Right - d, r.Y,          d, d, 270, 90);
-        p.AddArc(r.Right - d, r.Bottom - d, d, d,   0, 90);
-        p.AddArc(r.X,         r.Bottom - d, d, d,  90, 90);
-        p.CloseFigure();
-        return p;
     }
 
     // ── Mouse interaction ────────────────────────────────────────────────────

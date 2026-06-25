@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ClaudeWatch.Ui;
 using Markdig;
 using Markdig.Extensions.Tables;
 using Markdig.Syntax;
@@ -55,7 +56,7 @@ internal sealed class HistoryViewerForm : Form
     private readonly Font _titleFont   = new("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Point);
     private readonly Font _glyphFont   = new("Segoe UI", 11f, FontStyle.Regular, GraphicsUnit.Point);
 
-    private readonly Bitmap? _icon = LoadEmbeddedBitmap("ClaudeWatch.icon.png");
+    private readonly Bitmap? _icon = EmbeddedResources.LoadBitmap("ClaudeWatch.icon.png");
 
     // Markdown rendering: a parser for assistant/user prose, plus on-demand font caches (markdown needs
     // many size/style combinations — headers, bold, italic, strikethrough, links — so they're built lazily
@@ -1264,16 +1265,6 @@ internal sealed class HistoryViewerForm : Form
 
     private static string Clip(string s, int max) =>
         s.Length <= max ? s : s[..max] + $"\n… ({s.Length - max} more characters — switch to Raw for the full result)";
-
-    private static Bitmap? LoadEmbeddedBitmap(string resourceName)
-    {
-        try
-        {
-            using var stream = typeof(HistoryViewerForm).Assembly.GetManifestResourceStream(resourceName);
-            return stream != null ? new Bitmap(stream) : null;
-        }
-        catch { return null; }
-    }
 
     protected override void Dispose(bool disposing)
     {

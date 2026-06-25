@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using ClaudeWatch.Ui;
 
 namespace ClaudeWatch;
 
@@ -69,7 +70,7 @@ internal sealed class PopoverMenu : Form
         g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
 
         var bounds = new Rectangle(0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
-        using (var path = RoundedRect(bounds, Corner))
+        using (var path = PaintKit.RoundedRect(bounds, Corner))
         {
             using var bg = new SolidBrush(BgColor);
             g.FillPath(bg, path);
@@ -87,7 +88,7 @@ internal sealed class PopoverMenu : Form
             if (i == _hover)
             {
                 using var hover = new SolidBrush(HoverColor);
-                using var hp = RoundedRect(new Rectangle(r.X + 4, r.Y, r.Width - 8, r.Height), 5);
+                using var hp = PaintKit.RoundedRect(new Rectangle(r.X + 4, r.Y, r.Width - 8, r.Height), 5);
                 g.FillPath(hover, hp);
             }
             g.DrawString(_items[i].Label, font, fg,
@@ -139,17 +140,5 @@ internal sealed class PopoverMenu : Form
     {
         base.OnDeactivate(e);
         Close();
-    }
-
-    private static GraphicsPath RoundedRect(Rectangle r, int radius)
-    {
-        int d = radius * 2;
-        var p = new GraphicsPath();
-        p.AddArc(r.X,         r.Y,          d, d, 180, 90);
-        p.AddArc(r.Right - d, r.Y,          d, d, 270, 90);
-        p.AddArc(r.Right - d, r.Bottom - d, d, d,   0, 90);
-        p.AddArc(r.X,         r.Bottom - d, d, d,  90, 90);
-        p.CloseFigure();
-        return p;
     }
 }
