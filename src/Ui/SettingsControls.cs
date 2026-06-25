@@ -1,4 +1,5 @@
-namespace ClaudeWatch;
+namespace ClaudeWatch.Ui;
+using ClaudeWatch.Data;
 
 using System.Drawing.Drawing2D;
 using ClaudeWatch.Ui;

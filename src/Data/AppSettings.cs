@@ -1,4 +1,4 @@
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

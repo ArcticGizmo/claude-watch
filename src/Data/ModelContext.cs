@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>
 /// Resolves the context-window size (in tokens) of the model a session is currently running.

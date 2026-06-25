@@ -3,7 +3,8 @@ using ClaudeWatch.Ui;
 using Velopack;
 using Velopack.Sources;
 
-namespace ClaudeWatch;
+using ClaudeWatch.Data;
+namespace ClaudeWatch.App;
 
 internal sealed class OverlayApplicationContext : ApplicationContext
 {

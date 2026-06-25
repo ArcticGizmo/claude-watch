@@ -1,5 +1,6 @@
-using ClaudeWatch;
 using Velopack;
+
+namespace ClaudeWatch.App;
 
 internal static class Program
 {

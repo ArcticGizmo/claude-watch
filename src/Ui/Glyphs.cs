@@ -1,5 +1,4 @@
-using ClaudeWatch;
-
+using ClaudeWatch.Data;
 namespace ClaudeWatch.Ui;
 
 /// <summary>

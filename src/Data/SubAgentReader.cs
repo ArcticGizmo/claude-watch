@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using ClaudeWatch.Data;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>
 /// Discovers the sub-agents (Agent/Task tool invocations) currently running under a session.

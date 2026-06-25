@@ -4,7 +4,7 @@ using System.Drawing.Text;
 using ClaudeWatch.Ui;
 using QRCoder;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Ui;
 
 /// <summary>
 /// A small always-on-top card, centered on screen, showing the remote-control deep-link QR code for

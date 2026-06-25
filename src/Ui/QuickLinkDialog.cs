@@ -1,6 +1,7 @@
 using ClaudeWatch.Ui;
 
-namespace ClaudeWatch;
+using ClaudeWatch.Data;
+namespace ClaudeWatch.Ui;
 
 /// <summary>
 /// A small modal dialog for adding or editing a custom <see cref="QuickLink"/>: a display name and

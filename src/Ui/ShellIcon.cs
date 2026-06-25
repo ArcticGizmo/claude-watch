@@ -1,4 +1,4 @@
-namespace ClaudeWatch;
+namespace ClaudeWatch.Ui;
 
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;

@@ -1,3 +1,4 @@
+using ClaudeWatch.Data;
 using System.Runtime.CompilerServices;
 
 namespace ClaudeWatch.Tests;

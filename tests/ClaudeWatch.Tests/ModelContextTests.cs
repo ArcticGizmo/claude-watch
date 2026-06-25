@@ -1,4 +1,4 @@
-using ClaudeWatch;
+using ClaudeWatch.Data;
 using Xunit;
 
 namespace ClaudeWatch.Tests;

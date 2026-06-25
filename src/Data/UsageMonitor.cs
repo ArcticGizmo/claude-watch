@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using ClaudeWatch.Data;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>
 /// Polls the account-wide rate-limit usage from the same undocumented endpoint Claude Code's

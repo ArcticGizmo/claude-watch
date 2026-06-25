@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.App;
 
 /// <summary>
 /// Adds (and removes) the install directory to the per-user PATH so the claude-watch plugin — and the

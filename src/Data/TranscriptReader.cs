@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ClaudeWatch.Data;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>
 /// Reads a session's most recent tool call from its transcript and turns it into a short,

@@ -1,5 +1,5 @@
+using ClaudeWatch.Data;
 using System.Text.Json.Nodes;
-using ClaudeWatch;
 using Xunit;
 
 namespace ClaudeWatch.Tests;

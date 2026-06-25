@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Ui;
 
 internal static class NativeMethods
 {

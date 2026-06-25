@@ -2,7 +2,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using ClaudeWatch.Ui;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Ui;
 
 /// <summary>
 /// A small, self-contained context popover: a borderless, top-most, dark-themed list of clickable

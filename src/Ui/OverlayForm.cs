@@ -3,7 +3,7 @@ using System.Drawing.Text;
 using ClaudeWatch.Data;
 using ClaudeWatch.Ui;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Ui;
 
 /// <summary>
 /// Floating always-on-top status widget.

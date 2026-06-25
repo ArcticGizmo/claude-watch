@@ -1,4 +1,3 @@
-using ClaudeWatch;
 using ClaudeWatch.Data;
 using Xunit;
 

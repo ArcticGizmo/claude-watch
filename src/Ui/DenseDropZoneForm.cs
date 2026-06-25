@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Ui;
 
 /// <summary>Which screen edge the dense strip docks to.</summary>
 internal enum DenseSide { Left, Right }

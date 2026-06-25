@@ -1,4 +1,4 @@
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>
 /// A snapshot of the account-wide rate-limit usage as reported by Claude Code's

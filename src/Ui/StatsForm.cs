@@ -1,7 +1,8 @@
 using System.Drawing.Drawing2D;
 using ClaudeWatch.Ui;
 
-namespace ClaudeWatch;
+using ClaudeWatch.Data;
+namespace ClaudeWatch.Ui;
 
 /// <summary>
 /// A dedicated window showing Claude Code session statistics. A scope switch across the top selects

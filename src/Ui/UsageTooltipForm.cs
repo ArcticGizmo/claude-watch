@@ -2,7 +2,8 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using ClaudeWatch.Ui;
 
-namespace ClaudeWatch;
+using ClaudeWatch.Data;
+namespace ClaudeWatch.Ui;
 
 /// <summary>
 /// Small borderless popup shown when the cursor dwells over the usage bars. Lists the 5-hour

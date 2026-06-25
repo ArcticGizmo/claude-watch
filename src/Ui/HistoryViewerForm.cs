@@ -5,7 +5,8 @@ using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
-namespace ClaudeWatch;
+using ClaudeWatch.Data;
+namespace ClaudeWatch.Ui;
 
 /// <summary>
 /// A larger, persistent window for reading a Claude Code session's transcript. Dark custom chrome

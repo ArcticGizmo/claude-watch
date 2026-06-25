@@ -1,4 +1,4 @@
-namespace ClaudeWatch;
+namespace ClaudeWatch.App;
 
 using System.Text;
 

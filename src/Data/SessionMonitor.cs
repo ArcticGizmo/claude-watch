@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text.Json.Nodes;
 using ClaudeWatch.Data;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 internal sealed class SessionMonitor : IDisposable
 {

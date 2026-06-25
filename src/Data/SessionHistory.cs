@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using ClaudeWatch.Data;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>The kind of thing a <see cref="HistoryEvent"/> represents in a session transcript.</summary>
 internal enum HistoryEventKind

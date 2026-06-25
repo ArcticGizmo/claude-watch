@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
 using ClaudeWatch.Data;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>Aggregated statistics for a single day, derived from session transcripts.</summary>
 /// <param name="Day">The local calendar day these figures cover.</param>

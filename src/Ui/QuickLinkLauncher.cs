@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
-using ClaudeWatch;
 
+using ClaudeWatch.Data;
 namespace ClaudeWatch.Ui;
 
 /// <summary>

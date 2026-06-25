@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 /// <summary>
 /// Maps a Claude Code tool call (name + its JSON <c>input</c>) to a short, present-tense phrase

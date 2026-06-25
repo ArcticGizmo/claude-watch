@@ -1,4 +1,4 @@
-namespace ClaudeWatch;
+namespace ClaudeWatch.Data;
 
 using Microsoft.Win32;
 
