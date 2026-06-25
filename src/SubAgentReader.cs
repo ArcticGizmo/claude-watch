@@ -37,32 +37,18 @@ internal sealed class SubAgentReader
     private readonly record struct AgentRunState(long Length, DateTime WriteUtc, bool Running);
 
     /// <summary>
-    /// The sub-agent picture for one session: the running sub-agents to surface as child rows
-    /// (the legacy synchronous Task/Agent model), plus a count of background agents currently
-    /// doing work (the Claude Code 2.1+ model — see <see cref="Scan"/>). Exactly one of the two
-    /// is ever populated for a given session, depending on which model that build uses.
+    /// Returns the sub-agents currently working under the given session, or an empty list if the
+    /// transcript can't be located or read. Only direct children of the session are reported (a
+    /// sub-agent's own sub-agents live in that sub-agent's transcript).
     /// </summary>
-    public readonly record struct SubAgentScan(IReadOnlyList<SubAgent> Running, int BackgroundRunning)
-    {
-        public static readonly SubAgentScan Empty = new([], 0);
-
-        /// <summary>True when this session has any sub-agent actively working, by either model.</summary>
-        public bool AnyRunning => Running.Count > 0 || BackgroundRunning > 0;
-    }
-
-    /// <summary>
-    /// Returns the sub-agents working under the given session, or <see cref="SubAgentScan.Empty"/>
-    /// if the transcript can't be located or read. Only direct children of the session are
-    /// reported (a sub-agent's own sub-agents live in that sub-agent's transcript).
-    /// </summary>
-    public SubAgentScan Scan(string sessionId, string cwd)
+    public IReadOnlyList<SubAgent> GetRunning(string sessionId, string cwd)
     {
         if (string.IsNullOrEmpty(sessionId))
-            return SubAgentScan.Empty;
+            return [];
 
         var path = ResolveTranscript(sessionId, cwd);
         if (path == null)
-            return SubAgentScan.Empty;
+            return [];
 
         // Claude Code 2.1+ gives every sub-agent its own transcript under
         // {sessionId}/subagents/agent-*.jsonl and resolves the launching tool_use in the PARENT
@@ -74,7 +60,7 @@ internal sealed class SubAgentReader
         {
             var subagentsDir = Path.Combine(Path.GetDirectoryName(path)!, sessionId, "subagents");
             if (Directory.Exists(subagentsDir))
-                return new SubAgentScan([], CountRunningBackground(subagentsDir));
+                return ScanBackground(subagentsDir);
         }
         catch
         {
@@ -91,36 +77,64 @@ internal sealed class SubAgentReader
                 && cached.Length == fi.Length
                 && cached.WriteUtc == fi.LastWriteTimeUtc
             )
-                return new SubAgentScan(cached.Result, 0);
+                return cached.Result;
 
             var result = Parse(path);
             _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
-            return new SubAgentScan(result, 0);
+            return result;
         }
         catch
         {
-            return SubAgentScan.Empty;
+            return [];
         }
     }
 
-    // Counts the sub-agents under {sessionId}/subagents/ whose own transcript shows an in-progress
-    // turn. Cached per agent file by (length, last-write) so an unchanged transcript costs a stat.
-    private int CountRunningBackground(string dir)
+    // The sub-agents under {sessionId}/subagents/ whose own transcript shows an in-progress turn,
+    // each described from its sibling agent-{id}.meta.json. The running check is cached per agent
+    // file by (length, last-write) so an unchanged transcript costs a stat, not a parse.
+    private IReadOnlyList<SubAgent> ScanBackground(string dir)
     {
-        int running = 0;
+        var running = new List<SubAgent>();
         foreach (var file in Directory.EnumerateFiles(dir, "agent-*.jsonl"))
         {
             try
             {
-                if (IsAgentRunning(file))
-                    running++;
+                if (!IsAgentRunning(file))
+                    continue;
+
+                // agent-{id}.jsonl -> {id}; its description/type live in agent-{id}.meta.json.
+                var id = Path.GetFileNameWithoutExtension(file);
+                if (id.StartsWith("agent-", StringComparison.Ordinal))
+                    id = id["agent-".Length..];
+
+                var (desc, type) = ReadAgentMeta(Path.ChangeExtension(file, null) + ".meta.json");
+                running.Add(new SubAgent(id, desc, type));
             }
             catch
             {
-                // Skip an agent transcript that vanished or couldn't be read mid-scan.
+                // Skip an agent transcript/meta that vanished or couldn't be read mid-scan.
             }
         }
         return running;
+    }
+
+    // Reads description/agentType from an agent's tiny meta sidecar; blanks if it's missing or bad.
+    private static (string Desc, string Type) ReadAgentMeta(string metaPath)
+    {
+        try
+        {
+            if (!File.Exists(metaPath))
+                return ("", "");
+            var node = JsonNode.Parse(File.ReadAllText(metaPath));
+            return (
+                node?["description"]?.GetValue<string>() ?? "",
+                node?["agentType"]?.GetValue<string>() ?? ""
+            );
+        }
+        catch
+        {
+            return ("", "");
+        }
     }
 
     private bool IsAgentRunning(string path)
@@ -282,10 +296,9 @@ internal sealed class SubAgentReader
         {
             if (resultIds.Contains(id))
                 continue;
-            var label = string.IsNullOrWhiteSpace(info.Desc)
-                ? (string.IsNullOrWhiteSpace(info.Type) ? "sub-agent" : info.Type)
-                : info.Desc;
-            running.Add(new SubAgent(id, label, info.Type));
+            // Store the raw description and type; the overlay row owns the display fallback so both
+            // the legacy and background paths read the same.
+            running.Add(new SubAgent(id, info.Desc, info.Type));
         }
         return running;
     }

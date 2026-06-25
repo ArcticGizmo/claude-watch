@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.40] - 2026-06-25
+
+- Background sub-agents — now show up as child rows in the overlay, like ordinary sub-agents.
+
+---
+
 ## [v0.0.39] - 2026-06-25
 
 - "Check for Updates" now says "Checking for updates…" the moment you click it, instead of sitting silent until GitHub answers
