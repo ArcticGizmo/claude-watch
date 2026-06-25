@@ -288,12 +288,10 @@ the refactored paths — verdict PASS). Carry-forward items:
   *Candidate fix:* route `WindowHost.ShowOrFocus`'s focus step through the existing
   `NativeMethods.FocusWindow` (the `AttachThreadInput` lift used for terminal focus) instead of plain
   `Activate()`. Low priority / cosmetic.
-- **Phase 5 owes a runtime eyeball pass** (the UI is owner-drawn / eyeball-only). All five 5x commits
-  build clean with 60/60 tests, but the visual surfaces they touch need a look on a real (ideally
-  multi-monitor) setup: the overlay usage bars (5b), the shared flat buttons across Settings/History/
-  Stats/QuickLink dialogs (5d), and especially **dense mode** (5c) — Alt+Shift+W toggle, hover open/close,
-  the closed strip's counts, and drag-to-redock across monitors/edges. The logic was moved verbatim, so
-  this is a confirmation pass, not a debugging one.
+- **Phase 5 runtime eyeball pass — ✅ PASS.** The user ran the built tray app and confirmed the
+  Phase-5 surfaces render/behave as before: the overlay usage bars (5b), the shared flat buttons across
+  Settings/History/Stats/QuickLink dialogs (5d), and dense mode (5c) — Alt+Shift+W toggle, hover
+  open/close, the closed strip's counts, and drag-to-redock across monitors/edges. No regressions.
 - **`ToolWindow` base form** for the three dark popups (`PopoverMenu`, `UsageTooltipForm`, `QrCodeForm`):
   still deferred. Loosely "folded into Phase 5" by the Phase-3 note, but it wasn't part of the OverlayForm/
   SettingsForm decomposition that Phase 5 actually executed; left as a standalone follow-up.
