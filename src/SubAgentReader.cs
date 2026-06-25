@@ -26,6 +26,7 @@ internal sealed class SubAgentReader
     );
 
     private readonly Dictionary<string, CacheEntry> _cache = new();
+    private readonly Dictionary<string, AgentRunState> _agentCache = new();
 
     private readonly record struct CacheEntry(
         long Length,
@@ -33,20 +34,55 @@ internal sealed class SubAgentReader
         IReadOnlyList<SubAgent> Result
     );
 
+    private readonly record struct AgentRunState(long Length, DateTime WriteUtc, bool Running);
+
     /// <summary>
-    /// Returns the sub-agents currently running under the given session, or an empty list if
-    /// the transcript can't be located or read. Only direct children of the session are
+    /// The sub-agent picture for one session: the running sub-agents to surface as child rows
+    /// (the legacy synchronous Task/Agent model), plus a count of background agents currently
+    /// doing work (the Claude Code 2.1+ model — see <see cref="Scan"/>). Exactly one of the two
+    /// is ever populated for a given session, depending on which model that build uses.
+    /// </summary>
+    public readonly record struct SubAgentScan(IReadOnlyList<SubAgent> Running, int BackgroundRunning)
+    {
+        public static readonly SubAgentScan Empty = new([], 0);
+
+        /// <summary>True when this session has any sub-agent actively working, by either model.</summary>
+        public bool AnyRunning => Running.Count > 0 || BackgroundRunning > 0;
+    }
+
+    /// <summary>
+    /// Returns the sub-agents working under the given session, or <see cref="SubAgentScan.Empty"/>
+    /// if the transcript can't be located or read. Only direct children of the session are
     /// reported (a sub-agent's own sub-agents live in that sub-agent's transcript).
     /// </summary>
-    public IReadOnlyList<SubAgent> GetRunning(string sessionId, string cwd)
+    public SubAgentScan Scan(string sessionId, string cwd)
     {
         if (string.IsNullOrEmpty(sessionId))
-            return [];
+            return SubAgentScan.Empty;
 
         var path = ResolveTranscript(sessionId, cwd);
         if (path == null)
-            return [];
+            return SubAgentScan.Empty;
 
+        // Claude Code 2.1+ gives every sub-agent its own transcript under
+        // {sessionId}/subagents/agent-*.jsonl and resolves the launching tool_use in the PARENT
+        // transcript the moment the agent returns its first result — so the parent "open tool_use"
+        // heuristic below can't see a sub-agent that is still working, and can never see one that
+        // was re-driven via SendMessage. When that directory is present it is the source of truth:
+        // a sub-agent is running while its own transcript's latest turn is unfinished.
+        try
+        {
+            var subagentsDir = Path.Combine(Path.GetDirectoryName(path)!, sessionId, "subagents");
+            if (Directory.Exists(subagentsDir))
+                return new SubAgentScan([], CountRunningBackground(subagentsDir));
+        }
+        catch
+        {
+            // Fall through to the legacy parent-transcript scan.
+        }
+
+        // Legacy (synchronous Task/Agent) model: a sub-agent is running while its tool_use in the
+        // parent transcript has no matching tool_result.
         try
         {
             var fi = new FileInfo(path);
@@ -55,16 +91,110 @@ internal sealed class SubAgentReader
                 && cached.Length == fi.Length
                 && cached.WriteUtc == fi.LastWriteTimeUtc
             )
-                return cached.Result;
+                return new SubAgentScan(cached.Result, 0);
 
             var result = Parse(path);
             _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
-            return result;
+            return new SubAgentScan(result, 0);
         }
         catch
         {
-            return [];
+            return SubAgentScan.Empty;
         }
+    }
+
+    // Counts the sub-agents under {sessionId}/subagents/ whose own transcript shows an in-progress
+    // turn. Cached per agent file by (length, last-write) so an unchanged transcript costs a stat.
+    private int CountRunningBackground(string dir)
+    {
+        int running = 0;
+        foreach (var file in Directory.EnumerateFiles(dir, "agent-*.jsonl"))
+        {
+            try
+            {
+                if (IsAgentRunning(file))
+                    running++;
+            }
+            catch
+            {
+                // Skip an agent transcript that vanished or couldn't be read mid-scan.
+            }
+        }
+        return running;
+    }
+
+    private bool IsAgentRunning(string path)
+    {
+        var fi = new FileInfo(path);
+        if (
+            _agentCache.TryGetValue(path, out var cached)
+            && cached.Length == fi.Length
+            && cached.WriteUtc == fi.LastWriteTimeUtc
+        )
+            return cached.Running;
+
+        bool running = ClassifyRunning(path);
+        _agentCache[path] = new AgentRunState(fi.Length, fi.LastWriteTimeUtc, running);
+        return running;
+    }
+
+    // A sub-agent's own transcript ends in a completed assistant turn — a final assistant message
+    // with no pending tool call — only while it is idle, waiting for its next instruction. While it
+    // is working, the tail is either an assistant tool_use awaiting its result, or a freshly-injected
+    // user/tool_result record with no assistant reply yet. We classify off the last assistant/user
+    // record (ignoring trailing "system" bookkeeping records), which also keeps a long, silent shell
+    // command correctly pegged as running rather than guessing from file mtime.
+    private static bool ClassifyRunning(string path)
+    {
+        bool sawTurn = false;
+        bool lastWasUser = false;
+        bool lastAssistantHadToolUse = false;
+
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs);
+
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            // Only assistant/user records carry the turn boundary we need; skip the rest (system,
+            // summary, file-history snapshots) without the cost of parsing them as JSON.
+            if (line.Length == 0 || (!line.Contains("assistant") && !line.Contains("user")))
+                continue;
+
+            JsonNode? node;
+            try { node = JsonNode.Parse(line); }
+            catch { continue; }
+
+            var type = node?["type"]?.GetValue<string>();
+            if (type == "user")
+            {
+                sawTurn = true;
+                lastWasUser = true;
+            }
+            else if (type == "assistant")
+            {
+                sawTurn = true;
+                lastWasUser = false;
+                lastAssistantHadToolUse = false;
+                if (node!["message"]?["content"] is JsonArray content)
+                {
+                    foreach (var block in content)
+                    {
+                        if (block?["type"]?.GetValue<string>() == "tool_use")
+                        {
+                            lastAssistantHadToolUse = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!sawTurn)
+            return false;            // nothing yet / just spawned — no work to surface
+        if (lastWasUser)
+            return true;             // an injected prompt or a tool_result awaiting the next step
+        return lastAssistantHadToolUse; // assistant ended on a tool_use -> awaiting its result
     }
 
     private string? ResolveTranscript(string sessionId, string cwd)

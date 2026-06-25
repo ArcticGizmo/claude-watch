@@ -268,8 +268,10 @@ internal sealed class SessionMonitor : IDisposable
 
             // Sub-agents (Task tool) run inside this session's process and have no session file
             // of their own; surface them from the transcript and roll their activity up.
-            var subAgents = _subAgents.GetRunning(sessionId, cwd);
-            bool hasRunningSubs = subAgents.Count > 0;
+            var subScan = _subAgents.Scan(sessionId, cwd);
+            var subAgents = subScan.Running;
+            int backgroundAgents = subScan.BackgroundRunning;
+            bool hasRunningSubs = subScan.AnyRunning;
             bool hadRunningSubs = _hadRunningSubs.Contains(pid);
             bool subsJustFinished = hadRunningSubs && !hasRunningSubs;
 
@@ -354,7 +356,8 @@ internal sealed class SessionMonitor : IDisposable
                 externalNotify,
                 title,
                 contextFill,
-                contextWindow
+                contextWindow,
+                backgroundAgents
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))

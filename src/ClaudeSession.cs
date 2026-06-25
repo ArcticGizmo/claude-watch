@@ -51,7 +51,8 @@ public record ClaudeSession(
     bool ExternalNotify = false,
     string? Title = null,
     float? ContextFill = null,
-    int ContextWindow = ModelContext.DefaultWindow
+    int ContextWindow = ModelContext.DefaultWindow,
+    int BackgroundAgents = 0
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>

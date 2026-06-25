@@ -878,6 +878,44 @@ internal sealed class OverlayForm : Form
         g.SmoothingMode = oldSmoothing;
     }
 
+    // The background-agent indicator: a small robot head (rounded square with an antenna and two
+    // eyes) followed by the number of background sub-agents currently working under the session.
+    // Drawn just right of the status dot. Pure GDI in the sub-agent purple so it themes and scales
+    // like the other row glyphs. Returns the horizontal space it consumed (glyph + count + a
+    // trailing gap) so the caller can shift the following glyphs and the name across.
+    private static int DrawRobotBadge(Graphics g, int x, int midY, int count)
+    {
+        var oldSmoothing = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        using var pen   = new Pen(SubAgentColor, 1.3f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        using var brush = new SolidBrush(SubAgentColor);
+
+        const int hw = 10, hh = 8;          // head width / height
+        int top = midY - hh / 2;
+        int cx  = x + hw / 2;
+
+        // Antenna: a short stalk topped with a dot, rising from the head's top centre.
+        g.DrawLine(pen, cx, top - 3, cx, top);
+        g.FillEllipse(brush, cx - 1, top - 5, 3, 3);
+
+        // Head: a rounded square with two eyes.
+        using (var head = RoundedRect(new Rectangle(x, top, hw, hh), 2))
+            g.DrawPath(pen, head);
+        g.FillEllipse(brush, x + 2,      midY - 1, 2, 2);
+        g.FillEllipse(brush, x + hw - 4, midY - 1, 2, 2);
+
+        g.SmoothingMode = oldSmoothing;
+
+        // Count, just right of the head.
+        using var font = new Font("Segoe UI", 7.5f, FontStyle.Bold, GraphicsUnit.Point);
+        var label = count.ToString();
+        var sz = g.MeasureString(label, font);
+        g.DrawString(label, font, brush, x + hw + 2, midY - sz.Height / 2);
+
+        return hw + 2 + (int)Math.Ceiling(sz.Width) + 6;   // head + gap + number + trailing gap
+    }
+
     private static Bitmap? LoadEmbeddedBitmap(string resourceName)
     {
         try
@@ -1297,6 +1335,14 @@ internal sealed class OverlayForm : Form
             _                            => mutedBrush,
         };
 
+        // Leading glyphs sit just right of the status dot and push the name across, in order: the
+        // background-agent robot badge first, then the mail glyph (external notifications opted in),
+        // then the remote-control broadcast glyph.
+        int leadX     = HorizPad + 14;
+        int botWidth  = session.BackgroundAgents > 0
+            ? DrawRobotBadge(g, leadX, nameMidY, session.BackgroundAgents)
+            : 0;
+
         bool mail        = ExternalNotifyEnabled(session);
         int mailWidth    = mail ? MailIconWidth : 0;
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
@@ -1304,19 +1350,17 @@ internal sealed class OverlayForm : Form
         float ctxFill    = session.ContextFill ?? 0f;
         int thermoWidth  = _showContextPressure && ctxFill >= _ctxYellow ? ThermoIconWidth + 2 : 0;  // icon + 2 px gap right
         var statusSz     = g.MeasureString(statusText, statusFont);
-        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth - thermoWidth;
+        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth - thermoWidth - botWidth;
         var nameTrunc    = TruncateString(g, session.DisplayName, nameFont, nameMaxWidth);
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
-        // Glyphs sit just right of the status dot and push the name across: the mail glyph first
-        // (external notifications opted in), then the remote-control broadcast glyph.
         if (mail)
-            DrawMailIcon(g, HorizPad + 14, nameMidY);
+            DrawMailIcon(g, leadX + botWidth, nameMidY);
         if (session.RemoteControlled)
-            DrawRemoteIcon(g, HorizPad + 16 + mailWidth, nameMidY);
+            DrawRemoteIcon(g, leadX + botWidth + 2 + mailWidth, nameMidY);
 
         g.DrawString(nameTrunc, nameFont, fgBrush,
-            HorizPad + 14 + mailWidth + rcWidth, nameMidY - nameSz.Height / 2);
+            leadX + botWidth + mailWidth + rcWidth, nameMidY - nameSz.Height / 2);
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
