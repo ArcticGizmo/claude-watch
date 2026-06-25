@@ -242,8 +242,8 @@ internal sealed class UsageBarsControl : Control
         }
 
         bool stale = _usage.IsStale(DateTime.Now);
-        double? sessionExpected = _showExpectedRate ? ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
-        double? weeklyExpected  = _showExpectedRate ? ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
+        double? sessionExpected = _showExpectedRate ? UsageBarRenderer.ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
+        double? weeklyExpected  = _showExpectedRate ? UsageBarRenderer.ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
         DrawBar(g, 0,            "Session", _usage.FiveHourPercent, sessionExpected, stale, capFont, pctFont);
         DrawBar(g, BarRowHeight, "Weekly",  _usage.SevenDayPercent, weeklyExpected,  stale, capFont, pctFont);
 
@@ -257,70 +257,14 @@ internal sealed class UsageBarsControl : Control
         g.DrawString(string.Join("   ·   ", parts), footerFont, mutedBrush, 0, BarRowHeight * 2 + 2);
     }
 
+    // The settings panel's wider bar: no side inset (origin 0..Width), wider caption/pct columns,
+    // a taller track, and the Theme shades, blended toward this control's own BackColor when stale.
     private void DrawBar(Graphics g, int rowTop, string caption, double? percent,
-                         double? expectedPct, bool stale, Font capFont, Font pctFont)
-    {
-        int midY = rowTop + BarRowHeight / 2;
-
-        Color capColor = stale ? Theme.Blend(Theme.Muted, BackColor, 0.5f) : Theme.Muted;
-        using (var capBrush = new SolidBrush(capColor))
-        {
-            var capSz = g.MeasureString(caption, capFont);
-            g.DrawString(caption, capFont, capBrush, 0, midY - capSz.Height / 2);
-        }
-
-        int trackLeft  = CaptionW;
-        int trackRight = Width - PctW;
-        int trackW     = Math.Max(0, trackRight - trackLeft);
-        int trackY     = midY - TrackH / 2;
-
-        Color trackColor = stale ? Theme.Blend(Theme.Track, BackColor, 0.4f) : Theme.Track;
-        using (var trackBrush = new SolidBrush(trackColor))
-            PaintKit.FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
-
-        string pctText;
-        Color textColor;
-        if (percent is { } p)
-        {
-            double clamped = Math.Clamp(p, 0, 100);
-            Color barColor = Theme.UsageColor(clamped);
-            if (stale) barColor = Theme.Blend(barColor, BackColor, 0.5f);
-
-            int fillW = (int)Math.Round(trackW * clamped / 100.0);
-            if (fillW > 0)
-                using (var fillBrush = new SolidBrush(barColor))
-                    PaintKit.FillRoundedBar(g, fillBrush, trackLeft, trackY, fillW, TrackH);
-
-            pctText   = $"{(int)Math.Round(clamped)}%";
-            textColor = barColor;
-        }
-        else
-        {
-            pctText   = "—";
-            textColor = capColor;
-        }
-
-        // Expected-rate marker: thin vertical bar at the elapsed-time position.
-        if (expectedPct is { } ep && trackW > 0)
-        {
-            int markerX = trackLeft + (int)Math.Round(trackW * ep / 100.0);
-            Color markerColor = stale ? Theme.Blend(Theme.ExpectedMark, BackColor, 0.5f) : Theme.ExpectedMark;
-            using var markerBrush = new SolidBrush(markerColor);
-            g.FillRectangle(markerBrush, markerX - 1, trackY - 1, 2, TrackH + 2);
-        }
-
-        using var textBrush = new SolidBrush(textColor);
-        var txtSz = g.MeasureString(pctText, pctFont);
-        g.DrawString(pctText, pctFont, textBrush, Width - txtSz.Width, midY - txtSz.Height / 2);
-    }
-
-    private static double? ElapsedPercent(DateTime? resetsAt, TimeSpan window)
-    {
-        if (resetsAt is null) return null;
-        var elapsed = DateTime.Now - (resetsAt.Value - window);
-        return Math.Clamp(elapsed.TotalSeconds / window.TotalSeconds * 100.0, 0, 100);
-    }
-
+                         double? expectedPct, bool stale, Font capFont, Font pctFont) =>
+        UsageBarRenderer.Draw(g, 0, Width, rowTop + BarRowHeight / 2,
+            caption, percent, expectedPct, stale, capFont, pctFont,
+            Theme.Muted, Theme.Track, Theme.ExpectedMark, BackColor,
+            captionW: CaptionW, pctW: PctW, trackH: TrackH);
 }
 
 /// <summary>A legend listing each permission mode with the coloured fast-forward badge the

@@ -926,84 +926,20 @@ internal sealed class OverlayForm : Form
         using var pctFont = new Font("Segoe UI", 7.5f, FontStyle.Bold,    GraphicsUnit.Point);
 
         int top = HeaderHeight + 2;
-        double? sessionExpected = _showExpectedRate ? ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
-        double? weeklyExpected  = _showExpectedRate ? ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
+        double? sessionExpected = _showExpectedRate ? UsageBarRenderer.ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
+        double? weeklyExpected  = _showExpectedRate ? UsageBarRenderer.ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
         DrawUsageBar(g, top,                "Session", _usage.FiveHourPercent, sessionExpected, stale, capFont, pctFont);
         DrawUsageBar(g, top + BarRowHeight, "Weekly",  _usage.SevenDayPercent, weeklyExpected,  stale, capFont, pctFont);
     }
 
+    // The overlay's compact bar: a HorizPad inset on both sides, narrow caption/pct columns, the
+    // overlay's own muted/track/bg shades. The marker base is the shared (180,180,195).
     private void DrawUsageBar(Graphics g, int rowTop, string caption, double? percent,
-                              double? expectedPct, bool stale, Font capFont, Font pctFont)
-    {
-        const int CaptionW = 46;
-        const int PctW     = 34;
-        const int TrackH   = 7;
-
-        int midY = rowTop + BarRowHeight / 2;
-
-        // Caption (left)
-        Color capColor = stale ? Theme.Blend(MutedColor, BgColor, 0.5f) : MutedColor;
-        using (var capBrush = new SolidBrush(capColor))
-        {
-            var capSz = g.MeasureString(caption, capFont);
-            g.DrawString(caption, capFont, capBrush, HorizPad, midY - capSz.Height / 2);
-        }
-
-        // Track
-        int trackLeft  = HorizPad + CaptionW;
-        int trackRight = ClientSize.Width - HorizPad - PctW;
-        int trackW     = Math.Max(0, trackRight - trackLeft);
-        int trackY     = midY - TrackH / 2;
-
-        Color trackColor = stale ? Theme.Blend(UsageTrackColor, BgColor, 0.4f) : UsageTrackColor;
-        using (var trackBrush = new SolidBrush(trackColor))
-            PaintKit.FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
-
-        // Fill + percentage text
-        string pctText;
-        Color textColor;
-        if (percent is { } p)
-        {
-            double clamped = Math.Clamp(p, 0, 100);
-            Color barColor = Theme.UsageColor(clamped);
-            if (stale) barColor = Theme.Blend(barColor, BgColor, 0.5f);
-
-            int fillW = (int)Math.Round(trackW * clamped / 100.0);
-            if (fillW > 0)
-                using (var fillBrush = new SolidBrush(barColor))
-                    PaintKit.FillRoundedBar(g, fillBrush, trackLeft, trackY, fillW, TrackH);
-
-            pctText   = $"{(int)Math.Round(clamped)}%";
-            textColor = barColor;
-        }
-        else
-        {
-            pctText   = "—";
-            textColor = capColor;
-        }
-
-        // Expected-rate marker: thin vertical bar at the elapsed-time position.
-        if (expectedPct is { } ep && trackW > 0)
-        {
-            int markerX = trackLeft + (int)Math.Round(trackW * ep / 100.0);
-            Color markerColor = Color.FromArgb(180, 180, 195);
-            if (stale) markerColor = Theme.Blend(markerColor, BgColor, 0.5f);
-            using var markerBrush = new SolidBrush(markerColor);
-            g.FillRectangle(markerBrush, markerX - 1, trackY - 1, 2, TrackH + 2);
-        }
-
-        using var textBrush = new SolidBrush(textColor);
-        var txtSz = g.MeasureString(pctText, pctFont);
-        g.DrawString(pctText, pctFont, textBrush,
-            ClientSize.Width - HorizPad - txtSz.Width, midY - txtSz.Height / 2);
-    }
-
-    private static double? ElapsedPercent(DateTime? resetsAt, TimeSpan window)
-    {
-        if (resetsAt is null) return null;
-        var elapsed = DateTime.Now - (resetsAt.Value - window);
-        return Math.Clamp(elapsed.TotalSeconds / window.TotalSeconds * 100.0, 0, 100);
-    }
+                              double? expectedPct, bool stale, Font capFont, Font pctFont) =>
+        UsageBarRenderer.Draw(g, HorizPad, ClientSize.Width - HorizPad, rowTop + BarRowHeight / 2,
+            caption, percent, expectedPct, stale, capFont, pctFont,
+            MutedColor, UsageTrackColor, Color.FromArgb(180, 180, 195), BgColor,
+            captionW: 46, pctW: 34, trackH: 7);
 
     // ── Quick links row ───────────────────────────────────────────────────────
     // Draws the enabled quick-link icons side-by-side, centred horizontally. Each slot shows its
