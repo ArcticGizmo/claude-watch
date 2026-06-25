@@ -4,6 +4,11 @@
     - Maybe hooks can help?
 - add the ability to manage and customise statuslines
   - this may actually be a separate app, but I would like to be able to get all the information well formatted and swap between them at will
+- Allow rendering of really large session histories (think 10mb)
+  - the dropdown should also give an indicator of size so you know what to expect
+- make the permission mode dim when idle so that is less obvious
+- add a tooltip over the thermometer
+
 
 ## Quick wins
 - session count badge on tray icon — render active session count as a number overlay on the tray icon

@@ -9,6 +9,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.44] - 2026-06-25
+
+- Honours the `CLAUDE_CONFIG_DIR` environment variable, so a relocated Claude config is found (matching Claude Code itself).
+- A sweeping under-the-hood refactor you will not notice in the slightest — which is precisely the point.
+
+---
+
 ## [v0.0.43] - 2026-06-25
 
 - Outlook joins the quick-link presets, alongside Microsoft Teams (finds both new Outlook and classic Office-suite installs).

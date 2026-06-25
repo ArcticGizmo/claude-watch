@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Version>0.0.43</Version>
+    <Version>0.0.44</Version>
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
@@ -12,6 +12,10 @@
     <Product>Claude Watch</Product>
     <AssemblyTitle>Claude Watch</AssemblyTitle>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- The test project exercises the internal data/parsing logic directly. -->
+    <InternalsVisibleTo Include="ClaudeWatch.Tests" />
+  </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="icon.ico" />
     <EmbeddedResource Include="icon.png" />
