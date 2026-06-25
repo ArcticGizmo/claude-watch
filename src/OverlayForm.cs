@@ -11,7 +11,7 @@ namespace ClaudeWatch;
 /// Drag the header to reposition. Right-click for the exit menu.
 /// Clicking a session row focuses the terminal running that session.
 /// </summary>
-internal sealed class OverlayForm : Form
+internal sealed class OverlayForm : Form, IDenseHost
 {
     // ── Layout ────────────────────────────────────────────────────────────────
     private const int FormWidth       = 280;
@@ -32,17 +32,6 @@ internal sealed class OverlayForm : Form
     // Default vertical gap below the top of the working area for the floating panel. Sized to
     // clear most applications' window-control (close/minimize) buttons.
     private const int FloatTopGap = 32;
-    // Dense mode's first-time default sits further down still (4× the base gap) so the slim
-    // right-edge strip doesn't overlay application close icons.
-    private const int DenseTopGapDefault = 64;
-
-    // Dense mode: a narrow strip hugging the right screen edge that expands on hover.
-    private const int DenseClosedWidth = 44;
-    private const int DenseTopPad      = 8;
-    private const int DenseIconSize    = 22;
-    private const int DenseGap         = 6;
-    private const int DenseRowHeight   = 22;
-    private const int DenseBottomPad   = 8;
 
     // Header right-side glyphs (the dense toggle icon and the expand chevron).
     private const int IconBoxW    = 16;
@@ -90,27 +79,11 @@ internal sealed class OverlayForm : Form
     private int   _hoveredArtifactRow = -1;
     private bool  _attentionFlash;
 
-    // Dense mode: an alternate, out-of-the-way presentation with its own coordinates.
-    // _dense toggles the whole mode; _denseOpen is the hover-expanded popup within it.
-    // Floating and dense each keep their own position: _floatingLoc holds the floating
-    // location while we're in dense mode, and _denseY holds the dense strip's Y (its X is
-    // locked to the left or right screen edge per _denseSide). Nothing here is persisted across
-    // restarts.
-    private bool  _dense;
-    private bool  _denseOpen;
-    private int   _denseY;
-    private bool  _denseYInit;
-    private Point _floatingLoc;
-
-    // Which screen edge the dense strip hugs. Right matches the historical behaviour; dragging the
-    // strip onto a left-edge drop lane flips it.
-    private DenseSide _denseSide = DenseSide.Right;
-
-    // Which monitor the dense strip is docked to, stored by device name so a stale Screen object
-    // can't pin us to a monitor that's been disconnected. Null means the primary screen.
-    private string? _denseScreenDevice;
-    private readonly List<DenseDropZoneForm> _dropZones = [];
-    private DenseDropZoneForm? _activeDropZone;
+    // Dense mode: an alternate, out-of-the-way presentation (a slim strip hugging a screen edge that
+    // expands on hover). The whole state machine — on/off, the hover popup, the docked edge/monitor,
+    // the remembered positions, drag-to-redock, and the strip painting — lives in this controller; the
+    // form just forwards paint/mouse/relayout to it. Created in the constructor (after _icon exists).
+    private readonly DenseModeController _denseMode;
 
     private UsageInfo _usage = UsageInfo.Empty;
     private bool _usageEnabled = true;
@@ -141,7 +114,6 @@ internal sealed class OverlayForm : Form
     private readonly System.Windows.Forms.Timer _flashStopTimer;
     private readonly System.Windows.Forms.Timer _tickTimer;
     private readonly System.Windows.Forms.Timer _usageHoverTimer;
-    private readonly System.Windows.Forms.Timer _denseCloseTimer;
 
     // Auto-close countdown: while the owning context's "auto-close after last session" grace timer is
     // armed, a thin grey bar across the top of the panel depletes from full to empty, quietly hinting
@@ -157,7 +129,7 @@ internal sealed class OverlayForm : Form
 
     // Is the full session body (usage bars + rows) currently on screen? In floating mode that's
     // the expanded state; in dense mode it's the hover-opened popup.
-    private bool ShowFullPanel => _dense ? _denseOpen : _expanded;
+    private bool ShowFullPanel => _denseMode.IsDense ? _denseMode.IsOpen : _expanded;
 
     // External (ntfy) notifications. _externalNotifyAvailable mirrors the global setting and gates
     // both the per-session glyph and the right-click toggle; _externalNotifySessions holds the
@@ -217,17 +189,6 @@ internal sealed class OverlayForm : Form
                 ShowUsageTooltip();
         };
 
-        // Collapses the hover-opened dense popup once the cursor has been away for 750ms.
-        // Re-validated against the live cursor position so a quick out-and-back keeps it open.
-        _denseCloseTimer = new System.Windows.Forms.Timer { Interval = 750 };
-        _denseCloseTimer.Tick += (_, _) =>
-        {
-            if (_dense && _denseOpen && !Bounds.Contains(Cursor.Position))
-                CloseDensePopup();
-            else
-                _denseCloseTimer.Stop();
-        };
-
         // Repaints the auto-close countdown bar while it's active. Stops itself once the deadline
         // passes (the context's grace timer fires Exit at that point and tears the window down).
         _autoCloseBarTimer = new System.Windows.Forms.Timer { Interval = 50 };
@@ -238,7 +199,12 @@ internal sealed class OverlayForm : Form
             Invalidate();
         };
 
-        // If a monitor is added or removed, re-evaluate the dense docking; DenseScreen() resets to
+        // The dense-mode controller owns dense state/geometry/painting. Built here (not as a field
+        // initializer) so the icon it draws atop the strip is already loaded. The status-dot colours
+        // are passed in so the strip's counts match the rest of the overlay exactly.
+        _denseMode = new DenseModeController(this, RunningColor, AwaitingColor, AttentionColor, IdleColor);
+
+        // If a monitor is added or removed, re-evaluate the dense docking; the controller resets to
         // the primary screen when the monitor we were pinned to has disappeared.
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
     }
@@ -246,8 +212,20 @@ internal sealed class OverlayForm : Form
     private void OnDisplaySettingsChanged(object? sender, EventArgs e)
     {
         if (InvokeRequired) { BeginInvoke(new Action(() => OnDisplaySettingsChanged(sender, e))); return; }
-        if (_dense) { RelayoutWindow(); Invalidate(); }
+        _denseMode.OnDisplaySettingsChanged();
     }
+
+    // ── IDenseHost ───────────────────────────────────────────────────────────
+    // The slim surface the dense controller drives; window geometry and Invalidate come straight off
+    // Control. Explicit implementations so these stay off the form's own public surface.
+    int IDenseHost.FullPanelWidth => FormWidth;
+    int IDenseHost.FullPanelHeight() => FullPanelHeight();
+    IReadOnlyList<ClaudeSession> IDenseHost.Sessions => _sessions;
+    Bitmap? IDenseHost.Icon => _icon;
+    void IDenseHost.RelayoutWindow() => RelayoutWindow();
+    void IDenseHost.UpdateTickTimer() => UpdateTickTimer();
+    void IDenseHost.ClearRowHover() => _hoveredRow = -1;
+    void IDenseHost.HideUsageTooltip() => HideUsageTooltip();
 
     // ── Public API ────────────────────────────────────────────────────────────
     public void UpdateSessions(IReadOnlyList<ClaudeSession> sessions)
@@ -389,9 +367,9 @@ internal sealed class OverlayForm : Form
     {
         // Auto-surface the project that needs attention. In dense mode that means popping the
         // hover panel open (it auto-closes after 2s); otherwise expand the floating panel.
-        if (_dense)
+        if (_denseMode.IsDense)
         {
-            OpenDensePopup();
+            _denseMode.OpenPopup();
         }
         else if (!_expanded && _rows.Count > 0)
         {
@@ -441,19 +419,15 @@ internal sealed class OverlayForm : Form
         return top;
     }
 
-    // Owns the window's size and position for every mode/state. Floating keeps whatever location
-    // it was dragged to; both dense states dock to the right screen edge at the remembered _denseY.
+    // Owns the window's size and position. Floating keeps whatever location it was dragged to; in
+    // dense mode the controller docks the strip/popup to its remembered edge and Y.
     private void RelayoutWindow()
     {
         if (_dragging) return;  // never fight an in-progress drag
 
-        if (_dense)
+        if (_denseMode.IsDense)
         {
-            var wa = DenseScreen().WorkingArea;
-            int w  = _denseOpen ? FormWidth : DenseClosedWidth;
-            int h  = _denseOpen ? FullPanelHeight() : DenseStripHeight();
-            Location   = new Point(DenseX(w, wa), ClampDenseY(_denseY, h, wa));
-            ClientSize = new Size(w, h);
+            _denseMode.ApplyGeometry();
         }
         else
         {
@@ -480,147 +454,6 @@ internal sealed class OverlayForm : Form
         return h;
     }
 
-    // Height of the closed dense strip: the icon plus one row per non-zero status.
-    private int DenseStripHeight()
-    {
-        int visible = DenseStatusCounts().Count(c => c.count > 0);
-        int h = DenseTopPad + DenseIconSize;
-        if (visible > 0)
-            h += DenseGap + visible * DenseRowHeight;
-        return h + DenseBottomPad;
-    }
-
-    // Keeps the dense strip fully on screen vertically as its height changes with the session count.
-    private static int ClampDenseY(int y, int height, Rectangle wa) =>
-        Math.Clamp(y, wa.Top, Math.Max(wa.Top, wa.Bottom - height));
-
-    // X coordinate that hugs the docked edge: flush left, or flush right accounting for width.
-    private int DenseX(int width, Rectangle wa) =>
-        _denseSide == DenseSide.Left ? wa.Left : wa.Right - width;
-
-    // Resolves the monitor the dense strip docks to. If the remembered monitor has been
-    // disconnected, it self-heals by forgetting it and falling back to the primary screen.
-    private Screen DenseScreen()
-    {
-        if (_denseScreenDevice != null)
-        {
-            foreach (var s in Screen.AllScreens)
-                if (s.DeviceName == _denseScreenDevice)
-                    return s;
-            _denseScreenDevice = null;  // monitor vanished — reset to primary
-        }
-        return Screen.PrimaryScreen!;
-    }
-
-    // ── Dense drop zones ─────────────────────────────────────────────────────────
-    // While dragging the dense strip, every monitor gets a left- and a right-edge drop lane;
-    // releasing over one re-pins the strip to that monitor and edge. The lane matching the current
-    // dock is skipped (dropping there would be a no-op), so a single monitor still offers its
-    // opposite edge.
-    private void ShowDropZones()
-    {
-        if (_dropZones.Count > 0) return;
-
-        var current = DenseScreen();
-        foreach (var s in Screen.AllScreens)
-        {
-            foreach (var side in (ReadOnlySpan<DenseSide>)[DenseSide.Left, DenseSide.Right])
-            {
-                if (s.DeviceName == current.DeviceName && side == _denseSide) continue;
-                var zone = new DenseDropZoneForm(s, side);
-                _dropZones.Add(zone);
-                zone.Show();
-            }
-        }
-    }
-
-    private void UpdateActiveDropZone(Point screenPt)
-    {
-        DenseDropZoneForm? hit = null;
-        foreach (var z in _dropZones)
-            if (z.ContainsScreenPoint(screenPt)) { hit = z; break; }
-
-        if (hit == _activeDropZone) return;
-        _activeDropZone?.SetActive(false);
-        _activeDropZone = hit;
-        _activeDropZone?.SetActive(true);
-    }
-
-    private void HideDropZones()
-    {
-        foreach (var z in _dropZones) z.Dispose();
-        _dropZones.Clear();
-        _activeDropZone = null;
-    }
-
-    // Re-pins the dense strip to the monitor and edge whose drop lane the cursor was released over,
-    // dropping it at the release height (clamped onto that monitor).
-    private void PinToActiveDropZone()
-    {
-        if (_activeDropZone == null) return;
-        var screen = _activeDropZone.TargetScreen;
-        _denseScreenDevice = screen.DeviceName;
-        _denseSide = _activeDropZone.Side;
-        _denseY = ClampDenseY(Cursor.Position.Y - Height / 2, Height, screen.WorkingArea);
-        RelayoutWindow();
-        Invalidate();
-    }
-
-    // ── Dense mode transitions ─────────────────────────────────────────────────
-    public void ToggleDense()
-    {
-        if (_dense) ExitDense();
-        else        EnterDense();
-    }
-
-    private void EnterDense()
-    {
-        if (_dense) return;
-        _floatingLoc = Location;                       // remember where floating lives
-        if (!_denseYInit) { _denseY = DenseScreen().WorkingArea.Top + DenseTopGapDefault; _denseYInit = true; }
-        _dense = true;
-        _denseOpen = false;
-        _hoveredRow = -1;
-        HideUsageTooltip();
-        RelayoutWindow();
-        UpdateTickTimer();
-        Invalidate();
-    }
-
-    private void ExitDense()
-    {
-        if (!_dense) return;
-        _dense = false;
-        _denseOpen = false;
-        _denseCloseTimer.Stop();
-        HideUsageTooltip();
-        Location = _floatingLoc;                       // restore the floating position
-        RelayoutWindow();
-        UpdateTickTimer();
-        Invalidate();
-    }
-
-    private void OpenDensePopup()
-    {
-        if (!_dense || _denseOpen) return;
-        _denseOpen = true;
-        RelayoutWindow();
-        UpdateTickTimer();
-        Invalidate();
-    }
-
-    private void CloseDensePopup()
-    {
-        if (!_dense || !_denseOpen) return;
-        _denseOpen = false;
-        _denseCloseTimer.Stop();
-        _hoveredRow = -1;
-        HideUsageTooltip();
-        RelayoutWindow();
-        UpdateTickTimer();
-        Invalidate();
-    }
-
     // ── Painting ──────────────────────────────────────────────────────────────
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -638,9 +471,9 @@ internal sealed class OverlayForm : Form
         using (var pen = new Pen(borderColor, 1.5f))
             g.DrawPath(pen, path);
 
-        if (_dense && !_denseOpen)
+        if (_denseMode.IsClosedStrip)
         {
-            DrawDenseStrip(g);
+            _denseMode.PaintStrip(g);
             return;
         }
 
@@ -722,11 +555,11 @@ internal sealed class OverlayForm : Form
         // Dense toggle icon (always present). The glyph points along the docked edge: floating mode
         // shows the arrow collapsing toward that edge, dense mode shows it expanding inward. Clicking
         // it enters dense from floating, or leaves dense from the open popup.
-        DrawSideCollapseIcon(g, SideIconRect(), reversed: _dense ^ (_denseSide == DenseSide.Left));
+        DrawSideCollapseIcon(g, SideIconRect(), reversed: _denseMode.IsDense ^ (_denseMode.Side == DenseSide.Left));
 
         // Expand chevron — floating mode only (hidden in dense), and only when there's something to
         // expand. Sits just to the left of the dense toggle icon.
-        if (!_dense && _sessions.Count > 0)
+        if (!_denseMode.IsDense && _sessions.Count > 0)
         {
             var chevron = _expanded ? "▲" : "▼";
             var chSz    = g.MeasureString(chevron, chevFont);
@@ -760,51 +593,6 @@ internal sealed class OverlayForm : Form
         var sz    = g.MeasureString(label, font);
         g.DrawString(label, font, textBrush, x, midY - sz.Height / 2);
         return x + (int)sz.Width + 8;
-    }
-
-    // ── Dense strip ─────────────────────────────────────────────────────────────
-    // The four statuses in top-to-bottom display order, paired with their dot colour.
-    private (Color color, int count)[] DenseStatusCounts() =>
-    [
-        (RunningColor,   _sessions.Count(s => s.Status == SessionStatus.Running)),
-        (AwaitingColor,  _sessions.Count(s => s.Status == SessionStatus.AwaitingInput)),
-        (AttentionColor, _sessions.Count(s => s.Status == SessionStatus.NeedsAttention)),
-        (IdleColor,      _sessions.Count(s => s.Status == SessionStatus.Idle)),
-    ];
-
-    // The closed dense view: the claude-watch icon, then one centered "dot + count" row for each
-    // status that has at least one session. With no sessions at all, only the icon shows.
-    private void DrawDenseStrip(Graphics g)
-    {
-        int cx = ClientSize.Width / 2;
-
-        if (_icon != null)
-        {
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.DrawImage(_icon, new Rectangle(cx - DenseIconSize / 2, DenseTopPad, DenseIconSize, DenseIconSize));
-        }
-
-        using var countFont = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Point);
-        const int Dot = 8;
-        int y = DenseTopPad + DenseIconSize + DenseGap;
-
-        foreach (var (color, count) in DenseStatusCounts())
-        {
-            if (count == 0) continue;
-
-            var label  = count.ToString();
-            var sz     = g.MeasureString(label, countFont);
-            int groupW = Dot + 4 + (int)sz.Width;
-            int startX = cx - groupW / 2;
-            int midY   = y + DenseRowHeight / 2;
-
-            using (var brush = new SolidBrush(color))
-            {
-                g.FillEllipse(brush, startX, midY - Dot / 2, Dot, Dot);
-                g.DrawString(label, countFont, brush, startX + Dot + 4, midY - sz.Height / 2);
-            }
-            y += DenseRowHeight;
-        }
     }
 
     // Draws the dense toggle glyph: an arrow into a pipe. Plain "->|" collapses to the right edge
@@ -1317,7 +1105,7 @@ internal sealed class OverlayForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         // The closed dense strip is draggable anywhere; otherwise only the header is a drag handle.
-        bool inDragHandle = (_dense && !_denseOpen) || e.Y < HeaderHeight;
+        bool inDragHandle = _denseMode.IsClosedStrip || e.Y < HeaderHeight;
         if (e.Button == MouseButtons.Left && inDragHandle)
         {
             _dragging       = true;
@@ -1339,25 +1127,17 @@ internal sealed class OverlayForm : Form
             if (!_wasDrag && (Math.Abs(dx) > 4 || Math.Abs(dy) > 4))
             {
                 _wasDrag = true;
-                if (_dense) ShowDropZones();
+                if (_denseMode.IsDense) _denseMode.ShowDropZones();
             }
 
             if (_wasDrag)
             {
-                if (_dense)
-                {
+                if (_denseMode.IsDense)
                     // Dense stays hugging the current monitor's docked edge, moving only vertically;
                     // drop lanes let it be re-pinned to another edge or monitor on release.
-                    var wa   = DenseScreen().WorkingArea;
-                    int newY = ClampDenseY(_formStartLoc.Y + dy, Height, wa);
-                    Location = new Point(DenseX(Width, wa), newY);
-                    _denseY  = newY;
-                    UpdateActiveDropZone(cur);
-                }
+                    _denseMode.DragVertical(_formStartLoc.Y + dy, cur);
                 else
-                {
                     Location = new Point(_formStartLoc.X + dx, _formStartLoc.Y + dy);
-                }
             }
         }
         else
@@ -1420,9 +1200,9 @@ internal sealed class OverlayForm : Form
         _wasDrag  = false;
 
         // A dense drag released over another monitor's drop lane re-pins the strip there.
-        if (wasDrag && _dense && _activeDropZone != null)
-            PinToActiveDropZone();
-        HideDropZones();
+        if (wasDrag && _denseMode.IsDense)
+            _denseMode.PinToActiveDropZone();
+        _denseMode.HideDropZones();
 
         if (e.Button == MouseButtons.Right)
         {
@@ -1433,12 +1213,12 @@ internal sealed class OverlayForm : Form
 
         if (e.Button == MouseButtons.Left && !wasDrag)
         {
-            bool headerVisible = !(_dense && !_denseOpen);
+            bool headerVisible = !_denseMode.IsClosedStrip;
 
             if (headerVisible && SideIconRect().Contains(e.Location))
             {
                 // The dense toggle: enter dense from floating, or leave it from the open popup.
-                ToggleDense();
+                _denseMode.Toggle();
             }
             else if (HitTestArtifactIcon(e.Location) is var artRow && artRow >= 0)
             {
@@ -1462,7 +1242,7 @@ internal sealed class OverlayForm : Form
                 {
                     QuickLinkLauncher.LaunchOrFocus(_quickLinks[ql]);
                 }
-                else if (!_dense && e.Y < HeaderHeight && _sessions.Count > 0)
+                else if (!_denseMode.IsDense && e.Y < HeaderHeight && _sessions.Count > 0)
                 {
                     // Header click toggles expand/collapse — floating mode only.
                     _expanded = !_expanded;
@@ -1479,11 +1259,8 @@ internal sealed class OverlayForm : Form
     // Hovering the dense strip pops the full panel open; any re-entry cancels a pending auto-close.
     protected override void OnMouseEnter(EventArgs e)
     {
-        if (_dense)
-        {
-            _denseCloseTimer.Stop();
-            OpenDensePopup();
-        }
+        if (_denseMode.IsDense)
+            _denseMode.OnMouseEntered();
         base.OnMouseEnter(e);
     }
 
@@ -1498,8 +1275,8 @@ internal sealed class OverlayForm : Form
 
         // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
         // where the cursor legitimately roams to another monitor's drop lane.
-        if (_dense && _denseOpen && !_dragging)
-            _denseCloseTimer.Start();
+        if (_denseMode.IsDense && _denseMode.IsOpen && !_dragging)
+            _denseMode.SchedulePopupClose();
 
         Invalidate();
         base.OnMouseLeave(e);
@@ -1653,7 +1430,7 @@ internal sealed class OverlayForm : Form
             items.Add((label, () => ExternalNotifyToggleRequested?.Invoke(s.SessionId)));
         }
 
-        bool headerVisible = !(_dense && !_denseOpen);
+        bool headerVisible = !_denseMode.IsClosedStrip;
         bool overHeader = headerVisible && clientPt.Y >= 0 && clientPt.Y < HeaderHeight;
         if (overHeader)
             items.Add(("Exit Claude Watch", () => ExitRequested?.Invoke(this, EventArgs.Empty)));
@@ -1709,7 +1486,7 @@ internal sealed class OverlayForm : Form
     {
         if (m.Msg == WM_HOTKEY && m.WParam.ToInt32() == HotkeyId)
         {
-            ToggleDense();
+            _denseMode.Toggle();
             return;
         }
         base.WndProc(ref m);
@@ -1732,12 +1509,11 @@ internal sealed class OverlayForm : Form
         if (disposing)
         {
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
-            HideDropZones();
+            _denseMode.Dispose();
             _flashTimer.Dispose();
             _flashStopTimer.Dispose();
             _tickTimer.Dispose();
             _usageHoverTimer.Dispose();
-            _denseCloseTimer.Dispose();
             _autoCloseBarTimer.Dispose();
             _usageTooltip.Dispose();
             _popover?.Dispose();
