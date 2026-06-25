@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.36] - 2026-06-25
+
+- Context-pressure gauge — see a warning when your context window is about to boil over
+
+---
+
 ## [v0.0.35] - 2026-06-24
 
 - Sessions you've renamed with Claude Code's `/rename` now show that name in the overlay, notifications, and QR window — instead of the bare project folder

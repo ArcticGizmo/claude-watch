@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
@@ -27,8 +28,10 @@ internal sealed class TranscriptReader
 
     private readonly Dictionary<string, CacheEntry> _cache = new();
     private readonly Dictionary<string, CacheEntry> _titleCache = new();
+    private readonly Dictionary<string, ContextCacheEntry> _contextFillCache = new();
 
     private readonly record struct CacheEntry(long Length, DateTime WriteUtc, string? Result);
+    private readonly record struct ContextCacheEntry(long Length, DateTime WriteUtc, float? Fill, int Window);
 
     /// <summary>
     /// Returns a friendly phrase describing the latest tool call in the session's transcript,
@@ -98,6 +101,174 @@ internal sealed class TranscriptReader
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Returns the session's context-window fill (0–1) and the resolved window size in tokens.
+    /// Fill is null when no usage data is available. The window defaults to
+    /// <see cref="ModelContext.DefaultWindow"/> when no <c>/model</c> command was found.
+    /// Best-effort; never throws.
+    /// </summary>
+    public (float? Fill, int Window) GetContextFill(string sessionId, string cwd)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+            return (null, ModelContext.DefaultWindow);
+
+        var path = ResolveTranscript(sessionId, cwd);
+        if (path == null)
+            return (null, ModelContext.DefaultWindow);
+
+        try
+        {
+            var fi = new FileInfo(path);
+            if (_contextFillCache.TryGetValue(path, out var cached)
+                && cached.Length == fi.Length && cached.WriteUtc == fi.LastWriteTimeUtc)
+                return (cached.Fill, cached.Window);
+
+            var (fill, window) = ParseContextFill(path, cwd);
+            _contextFillCache[path] = new ContextCacheEntry(fi.Length, fi.LastWriteTimeUtc, fill, window);
+            return (fill, window);
+        }
+        catch
+        {
+            return (null, ModelContext.DefaultWindow);
+        }
+    }
+
+    private static (float? fill, int window) ParseContextFill(string path, string cwd)
+    {
+        // A /model switch can land anywhere in the transcript, and the most recent one wins — so unlike
+        // the activity/title tail-scans we must read the whole file. It's cheap: a substring pre-filter
+        // skips almost every line untouched (model records are rare, usage records parse only near the
+        // end's worth of assistant turns), and the result is cached by length+mtime so this full pass
+        // only re-runs when the transcript actually changed.
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs);
+
+        long latestUsed = 0;
+        string? latestDisplayName = null;
+
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (line.Length == 0)
+                continue;
+
+            // /model confirmation: a user-type record whose content is the terminal output string
+            // wrapped in <local-command-stdout>. The wrapper is the key discriminator — and it must be
+            // at the *start* of the content: user messages that quote or mention a "Set model to" line
+            // in their body carry the wrapper mid-string and must not be mistaken for a real switch.
+            if (line.Contains("local-command-stdout") && line.Contains("Set model to"))
+            {
+                try
+                {
+                    var node = JsonNode.Parse(line);
+                    if (node?["type"]?.GetValue<string>() == "user")
+                    {
+                        var raw = node["message"]?["content"]?.GetValue<string>();
+                        if (raw != null && raw.StartsWith("<local-command-stdout>"))
+                        {
+                            var dn = ModelContext.ParseDisplayName(raw);
+                            if (dn != null)
+                                latestDisplayName = dn;
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            if (line.Contains("\"usage\""))
+            {
+                try
+                {
+                    var usage = JsonNode.Parse(line)?["message"]?["usage"];
+                    if (usage != null)
+                    {
+                        long total = TokenLong(usage["input_tokens"]) + TokenLong(usage["cache_read_input_tokens"]);
+                        if (total > 0)
+                            latestUsed = total;
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // A /model confirmation in the transcript is authoritative (the user explicitly switched, and
+        // the most recent one wins). Lacking one, the session is running the configured default model —
+        // whose transcript message.model field can't reveal whether it's the 200k or 1M variant — so we
+        // fall back to the model id in settings.json, where the "[1m]" suffix makes that distinction.
+        int window = latestDisplayName != null
+            ? ModelContext.WindowFor(latestDisplayName)
+            : ModelContext.WindowForConfiguredModel(ReadConfiguredModel(cwd));
+
+        if (latestUsed == 0)
+            return (null, window);
+
+        return (Math.Clamp((float)latestUsed / window, 0f, 1f), window);
+    }
+
+    private static readonly JsonDocumentOptions JsonLeniency = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip,
+    };
+
+    /// <summary>
+    /// Reads the configured default <c>model</c> from Claude Code's settings, in the same precedence
+    /// Claude Code applies: project-local (<c>.claude/settings.local.json</c>) over project
+    /// (<c>.claude/settings.json</c>) over user (<c>~/.claude/settings.json</c>). The first file that
+    /// carries a non-blank <c>model</c> wins. Returns null when none do (e.g. the model is inherited
+    /// from a managed/enterprise layer we don't read), which the caller maps to the default window.
+    /// Best-effort; never throws.
+    /// </summary>
+    private static string? ReadConfiguredModel(string cwd)
+    {
+        var candidates = new List<string>();
+        if (!string.IsNullOrEmpty(cwd))
+        {
+            candidates.Add(Path.Combine(cwd, ".claude", "settings.local.json"));
+            candidates.Add(Path.Combine(cwd, ".claude", "settings.json"));
+        }
+        candidates.Add(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".claude", "settings.json"));
+
+        foreach (var path in candidates)
+        {
+            var model = ReadModelField(path);
+            if (model != null)
+                return model;
+        }
+
+        return null;
+    }
+
+    // Reads the top-level "model" string from one settings file, or null if absent/blank/unreadable.
+    private static string? ReadModelField(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+                return null;
+
+            using var doc = JsonDocument.Parse(File.ReadAllText(path), JsonLeniency);
+            if (doc.RootElement.TryGetProperty("model", out var m)
+                && m.ValueKind == JsonValueKind.String)
+            {
+                var s = m.GetString();
+                return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+            }
+        }
+        catch { }
+
+        return null;
+    }
+
+    private static long TokenLong(JsonNode? n)
+    {
+        if (n == null) return 0;
+        try { return n.GetValue<long>(); }
+        catch { try { return (long)n.GetValue<double>(); } catch { return 0; } }
     }
 
     /// <summary>Returns the full path to a session's .jsonl transcript, or null if not found.</summary>

@@ -400,3 +400,192 @@ internal sealed class ModeLegend : Control
         g.FillPolygon(brush, new[] { new Point(x + 7, midY - 5), new Point(x + 13, midY), new Point(x + 7, midY + 5) });
     }
 }
+
+/// <summary>
+/// A horizontal track with three draggable handles that set the context-pressure thresholds: where
+/// the thermometer first appears (Yellow), where it warms to Orange, and where it goes Red. The track
+/// is painted in the four resulting bands — a dim "hidden" zone below the first handle, then yellow /
+/// orange / red — so it doubles as a live preview of what each threshold means. Values are whole
+/// percentages, kept ordered (Yellow &lt; Orange &lt; Red). <see cref="RangeChanged"/> fires once per
+/// committed adjustment (drag release), not on every pixel of a drag, so the owner persists once.
+/// </summary>
+internal sealed class ContextThresholdSlider : Control
+{
+    private const int HandleR = 7;            // handle radius
+    private const int TrackH  = 8;
+    private const int Pad     = HandleR + 3;  // room for a handle centred at either end
+    private const int TrackY  = 14;           // track top; handles sit on it, caption goes below
+
+    private int _yellow = 50, _orange = 65, _red = 80;
+    private int _drag = -1;                   // handle being dragged: 0=Yellow, 1=Orange, 2=Red, -1=none
+
+    /// <summary>Fired when the user commits a change (drag release). Carries the ordered
+    /// (Yellow, Orange, Red) thresholds as whole percentages.</summary>
+    public event Action<int, int, int>? RangeChanged;
+
+    public ContextThresholdSlider()
+    {
+        DoubleBuffered = true;
+        BackColor      = Theme.FormBg;
+        Height         = 54;
+        Cursor         = Cursors.Hand;
+        TabStop        = false;
+    }
+
+    public (int Yellow, int Orange, int Red) Values => (_yellow, _orange, _red);
+
+    /// <summary>Seeds the handle positions without raising <see cref="RangeChanged"/> (used to load
+    /// saved settings). Sanitises bounds and ordering so a hand-edited settings file can't break it.</summary>
+    public void SetValues(int yellow, int orange, int red)
+    {
+        _red    = Math.Clamp(red,    2, 100);
+        _orange = Math.Clamp(orange, 1, _red - 1);
+        _yellow = Math.Clamp(yellow, 0, _orange - 1);
+        Invalidate();
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        Cursor = Enabled ? Cursors.Hand : Cursors.Default;
+        Invalidate();
+        base.OnEnabledChanged(e);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (!Enabled || e.Button != MouseButtons.Left) return;
+        _drag = NearestHandle(e.X, e.Y);
+        if (_drag >= 0) { ApplyDrag(e.X); Invalidate(); }
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (_drag < 0) return;
+        ApplyDrag(e.X);
+        Invalidate();
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (_drag >= 0)
+        {
+            _drag = -1;
+            RangeChanged?.Invoke(_yellow, _orange, _red);
+        }
+        base.OnMouseUp(e);
+    }
+
+    // Geometry. Values 0–100 map linearly onto the padded track width.
+    private int TrackLeft   => Pad;
+    private int TrackRight  => Width - Pad;
+    private int TrackW      => Math.Max(1, TrackRight - TrackLeft);
+    private int HandleMidY  => TrackY + TrackH / 2;
+    private int XFor(int v) => TrackLeft + (int)Math.Round(TrackW * v / 100.0);
+    private int ValFor(int x) => Math.Clamp((int)Math.Round((x - TrackLeft) * 100.0 / TrackW), 0, 100);
+
+    // Picks the handle nearest the click, but only when the click lands on the track row (so clicks
+    // on the caption below don't grab a handle). No horizontal cutoff: clicking anywhere on the row
+    // slides the nearest handle there, the usual slider feel.
+    private int NearestHandle(int x, int y)
+    {
+        if (Math.Abs(y - HandleMidY) > HandleR + 8) return -1;
+        int[] xs = { XFor(_yellow), XFor(_orange), XFor(_red) };
+        int best = -1, bestD = int.MaxValue;
+        for (int i = 0; i < xs.Length; i++)
+        {
+            int d = Math.Abs(x - xs[i]);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+
+    // Moves the dragged handle to the pointer, clamped so handles keep a 1% gap and never cross.
+    private void ApplyDrag(int x)
+    {
+        int v = ValFor(x);
+        switch (_drag)
+        {
+            case 0: _yellow = Math.Clamp(v, 0, _orange - 1); break;
+            case 1: _orange = Math.Clamp(v, _yellow + 1, _red - 1); break;
+            case 2: _red    = Math.Clamp(v, _orange + 1, 100); break;
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode     = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+        int left = TrackLeft, right = TrackRight;
+
+        // Band colours. The "hidden" zone below Yellow is a muted green — healthy, nothing shown.
+        Color hidden = Theme.Blend(Theme.Green, Theme.FormBg, 0.55f);
+        Color yellow = Theme.Yellow, orange = Theme.Orange, red = Theme.Red;
+        if (!Enabled)
+        {
+            hidden = Theme.Blend(hidden, Theme.FormBg, 0.5f);
+            yellow = Theme.Blend(yellow, Theme.FormBg, 0.5f);
+            orange = Theme.Blend(orange, Theme.FormBg, 0.5f);
+            red    = Theme.Blend(red,    Theme.FormBg, 0.5f);
+        }
+
+        int xy = XFor(_yellow), xo = XFor(_orange), xr = XFor(_red);
+
+        // Clip to a rounded track so the outer ends are capped but the internal band joins stay crisp.
+        using (var clip = RoundedPath(new Rectangle(left, TrackY, TrackW, TrackH), TrackH / 2))
+        {
+            g.SetClip(clip);
+            FillSpan(g, left, xy,    TrackY, hidden);
+            FillSpan(g, xy,   xo,    TrackY, yellow);
+            FillSpan(g, xo,   xr,    TrackY, orange);
+            FillSpan(g, xr,   right, TrackY, red);
+            g.ResetClip();
+        }
+
+        // Handles: a light disc with a thin outline, one per threshold.
+        DrawHandle(g, xy);
+        DrawHandle(g, xo);
+        DrawHandle(g, xr);
+
+        // Caption below the track, naming each threshold. Updates live as the handles move.
+        using var font  = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
+        using var muted = new SolidBrush(Enabled ? Theme.Muted : Theme.Border);
+        string caption  = $"Shows at {_yellow}%      orange at {_orange}%      red at {_red}%";
+        g.DrawString(caption, font, muted, left - 1, TrackY + TrackH + 8);
+    }
+
+    private static void FillSpan(Graphics g, int x0, int x1, int y, Color color)
+    {
+        if (x1 <= x0) return;
+        using var brush = new SolidBrush(color);
+        g.FillRectangle(brush, x0, y, x1 - x0, TrackH);
+    }
+
+    private void DrawHandle(Graphics g, int cx)
+    {
+        int cy = HandleMidY;
+        var rect = new Rectangle(cx - HandleR, cy - HandleR, HandleR * 2, HandleR * 2);
+
+        Color fill = Enabled ? Color.FromArgb(235, 235, 245) : Theme.Blend(Color.FromArgb(235, 235, 245), Theme.FormBg, 0.5f);
+        using var fb = new SolidBrush(fill);
+        using var pen = new Pen(Color.FromArgb(120, 0, 0, 0), 1f);
+        g.FillEllipse(fb, rect);
+        g.DrawEllipse(pen, rect);
+    }
+
+    private static GraphicsPath RoundedPath(Rectangle r, int radius)
+    {
+        int d = Math.Min(radius * 2, Math.Min(r.Width, r.Height));
+        var p = new GraphicsPath();
+        if (d <= 0) { p.AddRectangle(r); return p; }
+        p.AddArc(r.X, r.Y, d, d, 180, 90);
+        p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        p.CloseFigure();
+        return p;
+    }
+}
