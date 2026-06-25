@@ -26,6 +26,7 @@ internal sealed class SubAgentReader
     );
 
     private readonly Dictionary<string, CacheEntry> _cache = new();
+    private readonly Dictionary<string, AgentRunState> _agentCache = new();
 
     private readonly record struct CacheEntry(
         long Length,
@@ -33,10 +34,12 @@ internal sealed class SubAgentReader
         IReadOnlyList<SubAgent> Result
     );
 
+    private readonly record struct AgentRunState(long Length, DateTime WriteUtc, bool Running);
+
     /// <summary>
-    /// Returns the sub-agents currently running under the given session, or an empty list if
-    /// the transcript can't be located or read. Only direct children of the session are
-    /// reported (a sub-agent's own sub-agents live in that sub-agent's transcript).
+    /// Returns the sub-agents currently working under the given session, or an empty list if the
+    /// transcript can't be located or read. Only direct children of the session are reported (a
+    /// sub-agent's own sub-agents live in that sub-agent's transcript).
     /// </summary>
     public IReadOnlyList<SubAgent> GetRunning(string sessionId, string cwd)
     {
@@ -47,6 +50,25 @@ internal sealed class SubAgentReader
         if (path == null)
             return [];
 
+        // Claude Code 2.1+ gives every sub-agent its own transcript under
+        // {sessionId}/subagents/agent-*.jsonl and resolves the launching tool_use in the PARENT
+        // transcript the moment the agent returns its first result — so the parent "open tool_use"
+        // heuristic below can't see a sub-agent that is still working, and can never see one that
+        // was re-driven via SendMessage. When that directory is present it is the source of truth:
+        // a sub-agent is running while its own transcript's latest turn is unfinished.
+        try
+        {
+            var subagentsDir = Path.Combine(Path.GetDirectoryName(path)!, sessionId, "subagents");
+            if (Directory.Exists(subagentsDir))
+                return ScanBackground(subagentsDir);
+        }
+        catch
+        {
+            // Fall through to the legacy parent-transcript scan.
+        }
+
+        // Legacy (synchronous Task/Agent) model: a sub-agent is running while its tool_use in the
+        // parent transcript has no matching tool_result.
         try
         {
             var fi = new FileInfo(path);
@@ -65,6 +87,128 @@ internal sealed class SubAgentReader
         {
             return [];
         }
+    }
+
+    // The sub-agents under {sessionId}/subagents/ whose own transcript shows an in-progress turn,
+    // each described from its sibling agent-{id}.meta.json. The running check is cached per agent
+    // file by (length, last-write) so an unchanged transcript costs a stat, not a parse.
+    private IReadOnlyList<SubAgent> ScanBackground(string dir)
+    {
+        var running = new List<SubAgent>();
+        foreach (var file in Directory.EnumerateFiles(dir, "agent-*.jsonl"))
+        {
+            try
+            {
+                if (!IsAgentRunning(file))
+                    continue;
+
+                // agent-{id}.jsonl -> {id}; its description/type live in agent-{id}.meta.json.
+                var id = Path.GetFileNameWithoutExtension(file);
+                if (id.StartsWith("agent-", StringComparison.Ordinal))
+                    id = id["agent-".Length..];
+
+                var (desc, type) = ReadAgentMeta(Path.ChangeExtension(file, null) + ".meta.json");
+                running.Add(new SubAgent(id, desc, type));
+            }
+            catch
+            {
+                // Skip an agent transcript/meta that vanished or couldn't be read mid-scan.
+            }
+        }
+        return running;
+    }
+
+    // Reads description/agentType from an agent's tiny meta sidecar; blanks if it's missing or bad.
+    private static (string Desc, string Type) ReadAgentMeta(string metaPath)
+    {
+        try
+        {
+            if (!File.Exists(metaPath))
+                return ("", "");
+            var node = JsonNode.Parse(File.ReadAllText(metaPath));
+            return (
+                node?["description"]?.GetValue<string>() ?? "",
+                node?["agentType"]?.GetValue<string>() ?? ""
+            );
+        }
+        catch
+        {
+            return ("", "");
+        }
+    }
+
+    private bool IsAgentRunning(string path)
+    {
+        var fi = new FileInfo(path);
+        if (
+            _agentCache.TryGetValue(path, out var cached)
+            && cached.Length == fi.Length
+            && cached.WriteUtc == fi.LastWriteTimeUtc
+        )
+            return cached.Running;
+
+        bool running = ClassifyRunning(path);
+        _agentCache[path] = new AgentRunState(fi.Length, fi.LastWriteTimeUtc, running);
+        return running;
+    }
+
+    // A sub-agent's own transcript ends in a completed assistant turn — a final assistant message
+    // with no pending tool call — only while it is idle, waiting for its next instruction. While it
+    // is working, the tail is either an assistant tool_use awaiting its result, or a freshly-injected
+    // user/tool_result record with no assistant reply yet. We classify off the last assistant/user
+    // record (ignoring trailing "system" bookkeeping records), which also keeps a long, silent shell
+    // command correctly pegged as running rather than guessing from file mtime.
+    private static bool ClassifyRunning(string path)
+    {
+        bool sawTurn = false;
+        bool lastWasUser = false;
+        bool lastAssistantHadToolUse = false;
+
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs);
+
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            // Only assistant/user records carry the turn boundary we need; skip the rest (system,
+            // summary, file-history snapshots) without the cost of parsing them as JSON.
+            if (line.Length == 0 || (!line.Contains("assistant") && !line.Contains("user")))
+                continue;
+
+            JsonNode? node;
+            try { node = JsonNode.Parse(line); }
+            catch { continue; }
+
+            var type = node?["type"]?.GetValue<string>();
+            if (type == "user")
+            {
+                sawTurn = true;
+                lastWasUser = true;
+            }
+            else if (type == "assistant")
+            {
+                sawTurn = true;
+                lastWasUser = false;
+                lastAssistantHadToolUse = false;
+                if (node!["message"]?["content"] is JsonArray content)
+                {
+                    foreach (var block in content)
+                    {
+                        if (block?["type"]?.GetValue<string>() == "tool_use")
+                        {
+                            lastAssistantHadToolUse = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!sawTurn)
+            return false;            // nothing yet / just spawned — no work to surface
+        if (lastWasUser)
+            return true;             // an injected prompt or a tool_result awaiting the next step
+        return lastAssistantHadToolUse; // assistant ended on a tool_use -> awaiting its result
     }
 
     private string? ResolveTranscript(string sessionId, string cwd)
@@ -152,10 +296,9 @@ internal sealed class SubAgentReader
         {
             if (resultIds.Contains(id))
                 continue;
-            var label = string.IsNullOrWhiteSpace(info.Desc)
-                ? (string.IsNullOrWhiteSpace(info.Type) ? "sub-agent" : info.Type)
-                : info.Desc;
-            running.Add(new SubAgent(id, label, info.Type));
+            // Store the raw description and type; the overlay row owns the display fallback so both
+            // the legacy and background paths read the same.
+            running.Add(new SubAgent(id, info.Desc, info.Type));
         }
         return running;
     }

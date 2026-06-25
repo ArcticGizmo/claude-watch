@@ -1225,16 +1225,36 @@ internal sealed class OverlayForm : Form
         using var nameFont   = new Font("Segoe UI", 8f, GraphicsUnit.Point);
         using var statusFont = new Font("Segoe UI", 7f, GraphicsUnit.Point);
         using var fgBrush    = new SolidBrush(FgColor);
+        using var mutedBrush = new SolidBrush(MutedColor);
         using var subBrush   = new SolidBrush(SubAgentColor);
 
         const string statusText = "running";
         var statusSz   = g.MeasureString(statusText, statusFont);
         int labelX     = dotX + 12;
         int labelMaxW  = ClientSize.Width - labelX - HorizPad - (int)statusSz.Width - 6;
-        var labelTrunc = TruncateString(g, sub.Description, nameFont, labelMaxW);
-        var labelSz    = g.MeasureString(labelTrunc, nameFont);
 
-        g.DrawString(labelTrunc, nameFont, fgBrush, labelX, midY - labelSz.Height / 2);
+        // The agent type (e.g. "general-purpose") leads, dim, ahead of the run's description.
+        // De-dupe when one is missing so we never show the same token twice or a blank row.
+        string type = sub.AgentType?.Trim() ?? "";
+        string desc = sub.Description?.Trim() ?? "";
+        if (string.Equals(desc, type, StringComparison.Ordinal)) desc = "";
+        if (type.Length == 0 && desc.Length == 0) desc = "sub-agent";
+
+        int x = labelX;
+        if (type.Length > 0)
+        {
+            var typeTrunc = TruncateString(g, type, nameFont, labelMaxW / 2);
+            var typeSz    = g.MeasureString(typeTrunc, nameFont);
+            g.DrawString(typeTrunc, nameFont, mutedBrush, x, midY - typeSz.Height / 2);
+            x += (int)typeSz.Width + 8;   // type + gap before the description
+        }
+
+        if (desc.Length > 0)
+        {
+            var descTrunc = TruncateString(g, desc, nameFont, labelMaxW - (x - labelX));
+            var descSz    = g.MeasureString(descTrunc, nameFont);
+            g.DrawString(descTrunc, nameFont, fgBrush, x, midY - descSz.Height / 2);
+        }
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, subBrush, statusX, midY - statusSz.Height / 2);
