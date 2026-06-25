@@ -670,6 +670,13 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _lastNotifiedProject = null;
         try
         {
+            // Querying GitHub can take a few seconds; show an immediate balloon so the click feels
+            // acknowledged rather than dead until the check resolves.
+            _notifyIcon.BalloonTipTitle = "Claude Watch";
+            _notifyIcon.BalloonTipText  = "Checking for updates…";
+            _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
+            _notifyIcon.ShowBalloonTip(3000);
+
             var mgr = new UpdateManager(new GithubSource("https://github.com/ArcticGizmo/claude-watch", null, false));
             var update = await mgr.CheckForUpdatesAsync();
             if (update == null)

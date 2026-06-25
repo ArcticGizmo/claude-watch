@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.39] - 2026-06-25
+
+- "Check for Updates" now says "Checking for updates…" the moment you click it, instead of sitting silent until GitHub answers
+
+---
+
 ## [v0.0.38] - 2026-06-25
 
 - Another go at making the plugin install actually stick — it was installing fine, then quietly refusing to load (a duplicate hooks declaration the newer Claude Code stopped tolerating)
