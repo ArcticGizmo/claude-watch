@@ -179,10 +179,7 @@ internal static class SessionStatsService
         var result = new List<DateTime>();
         try
         {
-            using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(fs);
-            string? line;
-            while ((line = reader.ReadLine()) != null)
+            foreach (var line in TranscriptScan.ReadLines(file))
             {
                 if (line.Length == 0)
                     continue;
@@ -193,13 +190,9 @@ internal static class SessionStatsService
 
                 try
                 {
-                    if (JsonNode.Parse(line)?["timestamp"]?.GetValue<string>() is { } iso
-                        && DateTimeOffset.TryParse(iso, out var dto))
-                    {
-                        var t = dto.LocalDateTime;
-                        if (t >= from && t < to)
-                            result.Add(t);
-                    }
+                    if (TranscriptJson.ParseTimestamp(JsonNode.Parse(line)?["timestamp"]?.GetValue<string>()) is { } t
+                        && t >= from && t < to)
+                        result.Add(t);
                 }
                 catch { }
             }
@@ -284,10 +277,7 @@ internal static class SessionStatsService
         string project = "", branch = "";
         try
         {
-            using var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var reader = new StreamReader(fs);
-            string? line;
-            while ((line = reader.ReadLine()) != null)
+            foreach (var line in TranscriptScan.ReadLines(file))
             {
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
@@ -311,7 +301,7 @@ internal static class SessionStatsService
                         branch = gb!;
                 }
 
-                if (ParseTimestamp(node["timestamp"]?.GetValue<string>()) is not { } t)
+                if (TranscriptJson.ParseTimestamp(node["timestamp"]?.GetValue<string>()) is not { } t)
                     continue;
                 if ((from != null && t < from) || t >= to)
                     continue;
@@ -333,10 +323,10 @@ internal static class SessionStatsService
                 {
                     var model = message["model"]?.GetValue<string>() ?? "unknown";
                     var tt = new TokenTotals(
-                        LongOf(usage["input_tokens"]),
-                        LongOf(usage["output_tokens"]),
-                        LongOf(usage["cache_creation_input_tokens"]),
-                        LongOf(usage["cache_read_input_tokens"]));
+                        TranscriptJson.AsLong(usage["input_tokens"]),
+                        TranscriptJson.AsLong(usage["output_tokens"]),
+                        TranscriptJson.AsLong(usage["cache_creation_input_tokens"]),
+                        TranscriptJson.AsLong(usage["cache_read_input_tokens"]));
                     data.Tokens += tt;
                     data.Models[model] = data.Models.GetValueOrDefault(model, TokenTotals.Zero) + tt;
                 }
@@ -345,7 +335,7 @@ internal static class SessionStatsService
                 {
                     foreach (var b in blocks)
                     {
-                        if (b?["type"]?.GetValue<string>() != "tool_use")
+                        if (TranscriptJson.BlockType(b) != "tool_use")
                             continue;
                         var name = b!["name"]?.GetValue<string>() ?? "tool";
                         data.ToolCalls++;
@@ -549,16 +539,6 @@ internal static class SessionStatsService
                   + t.Output * output) / 1_000_000m;
         }
         return null;   // unknown model — surfaced as "—" rather than a fabricated figure
-    }
-
-    private static DateTime? ParseTimestamp(string? iso) =>
-        !string.IsNullOrEmpty(iso) && DateTimeOffset.TryParse(iso, out var dto) ? dto.LocalDateTime : null;
-
-    private static long LongOf(JsonNode? n)
-    {
-        if (n == null) return 0;
-        try { return n.GetValue<long>(); }
-        catch { try { return (long)n.GetValue<double>(); } catch { return 0; } }
     }
 
     // Mutable per-(session, day) scratch used only while parsing one transcript.

@@ -4,6 +4,7 @@
     - Maybe hooks can help?
 - add the ability to manage and customise statuslines
   - this may actually be a separate app, but I would like to be able to get all the information well formatted and swap between them at will
+- Allow rendering of really large session histories (think 10mb)
 
 ## Quick wins
 - session count badge on tray icon — render active session count as a number overlay on the tray icon

@@ -150,7 +150,7 @@ internal sealed class TranscriptParser
         if (node == null) return;
 
         var type = node["type"]?.GetValue<string>();
-        DateTime? ts = ParseTimestamp(node["timestamp"]?.GetValue<string>());
+        DateTime? ts = TranscriptJson.ParseTimestamp(node["timestamp"]?.GetValue<string>());
         bool sidechain = node["isSidechain"]?.GetValue<bool>() ?? false;
         bool isUser = type == "user";
 
@@ -193,7 +193,7 @@ internal sealed class TranscriptParser
 
         foreach (var block in blocks)
         {
-            var btype = block?["type"]?.GetValue<string>();
+            var btype = TranscriptJson.BlockType(block);
             switch (btype)
             {
                 case "text":
@@ -289,12 +289,6 @@ internal sealed class TranscriptParser
         s = s.Trim();
         int nl = s.IndexOf('\n');
         return nl < 0 ? s : s[..nl];
-    }
-
-    private static DateTime? ParseTimestamp(string? iso)
-    {
-        if (string.IsNullOrEmpty(iso)) return null;
-        return DateTimeOffset.TryParse(iso, out var dto) ? dto.LocalDateTime : null;
     }
 
     // A tool_result's content is either a plain string or an array of {type:"text", text:…} blocks.

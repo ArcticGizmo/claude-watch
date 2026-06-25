@@ -171,13 +171,21 @@ the pure mechanical move.
 4. Verified: clean build (0 warnings/errors); real-data check confirms the projects dir and this
    repo's cwd-encoding resolve to the same files as before. No behaviour change.
 
-### Phase 2 — Transcript reading primitives *(medium risk — the riskiest data work)*
-1. Add `MtimeCache<T>`; collapse the 5 `TranscriptReader` caches and 2 `SubAgentReader` caches onto it.
-2. Add `TranscriptJson` helpers: unify `TokenLong`/`LongOf`, `ParseTimestamp`, the shared
-   tail-seek/drop-partial-line read, and content-block iteration (`tool_use`/`tool_result`/`text`).
-3. Refactor the readers to use them; each reader keeps its own pre-filter strings and domain mapping.
-4. Verify against the Phase 0 baseline — this is where subtle regressions (artifact de-dup,
-   bare-command detection, context-fill) could hide, so verify hard.
+### Phase 2 — Transcript reading primitives *(medium risk — the riskiest data work)* — ✅ DONE
+1. Added `MtimeCache<T>` (`src/Data/MtimeCache.cs`); collapsed the 5 `TranscriptReader` caches and the
+   2 `SubAgentReader` caches (7 hand-rolled cache dicts + entry records) onto it.
+2. Added `TranscriptScan` (`src/Data/TranscriptScan.cs`) — `OpenShared` / `ReadLines` / `ReadLinesFrom`
+   / `ReadTailLines`, the shared "open `FileShare.ReadWrite` + seek tail + drop partial first line"
+   boilerplate every parser repeated.
+3. Added `TranscriptJson` (`src/Data/TranscriptJson.cs`): unified `TokenLong`≡`LongOf` → `AsLong`,
+   the three `ParseTimestamp` copies → one, plus `ContentArray` / `BlockType` block accessors.
+4. Refactored `TranscriptReader`, `SubAgentReader`, `SessionStatsService`, and `TranscriptParser` onto
+   the three primitives — each keeps its own pre-filter strings and domain mapping, so the scan logic
+   is unchanged. (Left alone, by design: `TranscriptParser.Ingest`'s incremental byte-offset tailing,
+   `SessionHistory.ResolveProject`'s bounded head-peek, and `UsageMonitor`'s non-transcript reads — all
+   different access patterns, not this abstraction.)
+5. Verified: the 60-test Phase 0 golden baseline still passes unchanged (artifact de-dup, bare-command,
+   context-fill, stats counts/tokens/cost all intact); full solution builds clean (0 warnings).
 
 ### Phase 3 — UI foundation *(low risk, high consistency payoff)*
 1. **Extend `Theme`** into the single palette: add overlay status colours, body/card backgrounds,

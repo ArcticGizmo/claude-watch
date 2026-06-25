@@ -19,16 +19,10 @@ namespace ClaudeWatch;
 /// </summary>
 internal sealed class SubAgentReader
 {
-    private readonly Dictionary<string, CacheEntry> _cache = new();
-    private readonly Dictionary<string, AgentRunState> _agentCache = new();
-
-    private readonly record struct CacheEntry(
-        long Length,
-        DateTime WriteUtc,
-        IReadOnlyList<SubAgent> Result
-    );
-
-    private readonly record struct AgentRunState(long Length, DateTime WriteUtc, bool Running);
+    // Legacy parent-transcript scan, memoised by the parent transcript's (length, last-write).
+    private readonly MtimeCache<IReadOnlyList<SubAgent>> _legacy = new();
+    // 2.1+ per-agent "is this sub-agent still running" check, memoised by each agent file's mtime.
+    private readonly MtimeCache<bool> _agentRunning = new();
 
     /// <summary>
     /// Returns the sub-agents currently working under the given session, or an empty list if the
@@ -63,24 +57,7 @@ internal sealed class SubAgentReader
 
         // Legacy (synchronous Task/Agent) model: a sub-agent is running while its tool_use in the
         // parent transcript has no matching tool_result.
-        try
-        {
-            var fi = new FileInfo(path);
-            if (
-                _cache.TryGetValue(path, out var cached)
-                && cached.Length == fi.Length
-                && cached.WriteUtc == fi.LastWriteTimeUtc
-            )
-                return cached.Result;
-
-            var result = Parse(path);
-            _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
-            return result;
-        }
-        catch
-        {
-            return [];
-        }
+        return _legacy.GetOrCompute(path, Parse, []);
     }
 
     // The sub-agents under {sessionId}/subagents/ whose own transcript shows an in-progress turn,
@@ -131,20 +108,8 @@ internal sealed class SubAgentReader
         }
     }
 
-    private bool IsAgentRunning(string path)
-    {
-        var fi = new FileInfo(path);
-        if (
-            _agentCache.TryGetValue(path, out var cached)
-            && cached.Length == fi.Length
-            && cached.WriteUtc == fi.LastWriteTimeUtc
-        )
-            return cached.Running;
-
-        bool running = ClassifyRunning(path);
-        _agentCache[path] = new AgentRunState(fi.Length, fi.LastWriteTimeUtc, running);
-        return running;
-    }
+    private bool IsAgentRunning(string path) =>
+        _agentRunning.GetOrCompute(path, ClassifyRunning, false);
 
     // A sub-agent's own transcript ends in a completed assistant turn — a final assistant message
     // with no pending tool call — only while it is idle, waiting for its next instruction. While it
@@ -158,11 +123,7 @@ internal sealed class SubAgentReader
         bool lastWasUser = false;
         bool lastAssistantHadToolUse = false;
 
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(fs);
-
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        foreach (var line in TranscriptScan.ReadLines(path))
         {
             // Only assistant/user records carry the turn boundary we need; skip the rest (system,
             // summary, file-history snapshots) without the cost of parsing them as JSON.
@@ -184,11 +145,11 @@ internal sealed class SubAgentReader
                 sawTurn = true;
                 lastWasUser = false;
                 lastAssistantHadToolUse = false;
-                if (node!["message"]?["content"] is JsonArray content)
+                if (TranscriptJson.ContentArray(node) is { } content)
                 {
                     foreach (var block in content)
                     {
-                        if (block?["type"]?.GetValue<string>() == "tool_use")
+                        if (TranscriptJson.BlockType(block) == "tool_use")
                         {
                             lastAssistantHadToolUse = true;
                             break;
@@ -212,11 +173,7 @@ internal sealed class SubAgentReader
         var taskUses = new Dictionary<string, (string Desc, string Type)>();
         var resultIds = new HashSet<string>();
 
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(fs);
-
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        foreach (var line in TranscriptScan.ReadLines(path))
         {
             // Cheap pre-filter: only the (rare) lines that could carry a sub-agent tool_use or
             // any tool_result are worth parsing as JSON. Most transcript lines match neither.
@@ -225,12 +182,12 @@ internal sealed class SubAgentReader
 
             try
             {
-                if (JsonNode.Parse(line)?["message"]?["content"] is not JsonArray content)
+                if (TranscriptJson.ContentArray(JsonNode.Parse(line)) is not { } content)
                     continue;
 
                 foreach (var block in content)
                 {
-                    var type = block?["type"]?.GetValue<string>();
+                    var type = TranscriptJson.BlockType(block);
                     // The sub-agent launcher is the "Agent" tool (older Claude Code called it "Task").
                     var name = type == "tool_use" ? block!["name"]?.GetValue<string>() : null;
                     if (name is "Agent" or "Task")

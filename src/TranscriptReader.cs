@@ -12,24 +12,20 @@ namespace ClaudeWatch;
 /// live and can grow large, so we never read the whole file — only the <see cref="TailBytes"/>
 /// tail is seeked and scanned. The most recent <c>tool_use</c> block in that tail wins.
 ///
-/// Results are cached per transcript by (length, last-write) so a scan while a session is busy —
-/// during which the transcript does not change between consecutive scans — costs a stat, not a parse.
-/// Every failure path returns <c>null</c>; this is best-effort and must never throw.
+/// Each derived value is memoised per transcript by (length, last-write) via <see cref="MtimeCache{T}"/>,
+/// so a scan while a session is busy — during which the transcript doesn't change between consecutive
+/// scans — costs a stat, not a parse. Every failure path returns the empty value; this is best-effort
+/// and must never throw.
 /// </summary>
 internal sealed class TranscriptReader
 {
     private const int TailBytes = 32 * 1024;
 
-    private readonly Dictionary<string, CacheEntry> _cache = new();
-    private readonly Dictionary<string, CacheEntry> _titleCache = new();
-    private readonly Dictionary<string, ContextCacheEntry> _contextFillCache = new();
-    private readonly Dictionary<string, BareCommandCacheEntry> _bareCommandCache = new();
-    private readonly Dictionary<string, ArtifactCacheEntry> _artifactCache = new();
-
-    private readonly record struct CacheEntry(long Length, DateTime WriteUtc, string? Result);
-    private readonly record struct BareCommandCacheEntry(long Length, DateTime WriteUtc, bool Result);
-    private readonly record struct ContextCacheEntry(long Length, DateTime WriteUtc, float? Fill, int Window);
-    private readonly record struct ArtifactCacheEntry(long Length, DateTime WriteUtc, IReadOnlyList<Artifact> Result);
+    private readonly MtimeCache<string?> _activity = new();
+    private readonly MtimeCache<string?> _title = new();
+    private readonly MtimeCache<(float? Fill, int Window)> _contextFill = new();
+    private readonly MtimeCache<bool> _bareCommand = new();
+    private readonly MtimeCache<IReadOnlyList<Artifact>> _artifacts = new();
 
     /// <summary>
     /// Returns a friendly phrase describing the latest tool call in the session's transcript,
@@ -39,29 +35,8 @@ internal sealed class TranscriptReader
     {
         if (string.IsNullOrEmpty(sessionId))
             return null;
-
         var path = TranscriptLocator.Resolve(sessionId, cwd);
-        if (path == null)
-            return null;
-
-        try
-        {
-            var fi = new FileInfo(path);
-            if (
-                _cache.TryGetValue(path, out var cached)
-                && cached.Length == fi.Length
-                && cached.WriteUtc == fi.LastWriteTimeUtc
-            )
-                return cached.Result;
-
-            var result = Parse(path);
-            _cache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
-            return result;
-        }
-        catch
-        {
-            return null;
-        }
+        return path == null ? null : _activity.GetOrCompute(path, Parse, null);
     }
 
     /// <summary>
@@ -83,29 +58,8 @@ internal sealed class TranscriptReader
     {
         if (string.IsNullOrEmpty(sessionId))
             return false;
-
         var path = TranscriptLocator.Resolve(sessionId, cwd);
-        if (path == null)
-            return false;
-
-        try
-        {
-            var fi = new FileInfo(path);
-            if (
-                _bareCommandCache.TryGetValue(path, out var cached)
-                && cached.Length == fi.Length
-                && cached.WriteUtc == fi.LastWriteTimeUtc
-            )
-                return cached.Result;
-
-            var result = ParseBareCommand(path);
-            _bareCommandCache[path] = new BareCommandCacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
-            return result;
-        }
-        catch
-        {
-            return false;
-        }
+        return path != null && _bareCommand.GetOrCompute(path, ParseBareCommand, false);
     }
 
     /// <summary>
@@ -120,29 +74,8 @@ internal sealed class TranscriptReader
     {
         if (string.IsNullOrEmpty(sessionId))
             return null;
-
         var path = TranscriptLocator.Resolve(sessionId, cwd);
-        if (path == null)
-            return null;
-
-        try
-        {
-            var fi = new FileInfo(path);
-            if (
-                _titleCache.TryGetValue(path, out var cached)
-                && cached.Length == fi.Length
-                && cached.WriteUtc == fi.LastWriteTimeUtc
-            )
-                return cached.Result;
-
-            var result = ParseTitle(path);
-            _titleCache[path] = new CacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
-            return result;
-        }
-        catch
-        {
-            return null;
-        }
+        return path == null ? null : _title.GetOrCompute(path, ParseTitle, null);
     }
 
     /// <summary>
@@ -155,26 +88,10 @@ internal sealed class TranscriptReader
     {
         if (string.IsNullOrEmpty(sessionId))
             return (null, ModelContext.DefaultWindow);
-
         var path = TranscriptLocator.Resolve(sessionId, cwd);
         if (path == null)
             return (null, ModelContext.DefaultWindow);
-
-        try
-        {
-            var fi = new FileInfo(path);
-            if (_contextFillCache.TryGetValue(path, out var cached)
-                && cached.Length == fi.Length && cached.WriteUtc == fi.LastWriteTimeUtc)
-                return (cached.Fill, cached.Window);
-
-            var (fill, window) = ParseContextFill(path, cwd);
-            _contextFillCache[path] = new ContextCacheEntry(fi.Length, fi.LastWriteTimeUtc, fill, window);
-            return (fill, window);
-        }
-        catch
-        {
-            return (null, ModelContext.DefaultWindow);
-        }
+        return _contextFill.GetOrCompute(path, p => ParseContextFill(p, cwd), (null, ModelContext.DefaultWindow));
     }
 
     /// <summary>
@@ -186,26 +103,8 @@ internal sealed class TranscriptReader
     {
         if (string.IsNullOrEmpty(sessionId))
             return [];
-
         var path = TranscriptLocator.Resolve(sessionId, cwd);
-        if (path == null)
-            return [];
-
-        try
-        {
-            var fi = new FileInfo(path);
-            if (_artifactCache.TryGetValue(path, out var cached)
-                && cached.Length == fi.Length && cached.WriteUtc == fi.LastWriteTimeUtc)
-                return cached.Result;
-
-            var result = ParseArtifacts(path);
-            _artifactCache[path] = new ArtifactCacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
-            return result;
-        }
-        catch
-        {
-            return [];
-        }
+        return path == null ? [] : _artifacts.GetOrCompute(path, ParseArtifacts, []);
     }
 
     private static IReadOnlyList<Artifact> ParseArtifacts(string path)
@@ -215,14 +114,10 @@ internal sealed class TranscriptReader
         // length+mtime so this only re-runs when the transcript actually changed. Each publish leaves
         // one record whose toolUseResult.url is the hosted page; re-publishing reuses the URL, so we
         // de-dupe by URL (last title wins) while preserving first-seen order.
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(fs);
-
         var order = new List<string>();
         var titles = new Dictionary<string, string>();
 
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        foreach (var line in TranscriptScan.ReadLines(path))
         {
             // Cheap pre-filter: only the publish result records carry the artifact URL stem.
             if (!line.Contains("code/artifact"))
@@ -262,14 +157,10 @@ internal sealed class TranscriptReader
         // skips almost every line untouched (model records are rare, usage records parse only near the
         // end's worth of assistant turns), and the result is cached by length+mtime so this full pass
         // only re-runs when the transcript actually changed.
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new StreamReader(fs);
-
         long latestUsed = 0;
         string? latestDisplayName = null;
 
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        foreach (var line in TranscriptScan.ReadLines(path))
         {
             if (line.Length == 0)
                 continue;
@@ -304,7 +195,7 @@ internal sealed class TranscriptReader
                     var usage = JsonNode.Parse(line)?["message"]?["usage"];
                     if (usage != null)
                     {
-                        long total = TokenLong(usage["input_tokens"]) + TokenLong(usage["cache_read_input_tokens"]);
+                        long total = TranscriptJson.AsLong(usage["input_tokens"]) + TranscriptJson.AsLong(usage["cache_read_input_tokens"]);
                         if (total > 0)
                             latestUsed = total;
                     }
@@ -382,32 +273,13 @@ internal sealed class TranscriptReader
         return null;
     }
 
-    private static long TokenLong(JsonNode? n)
-    {
-        if (n == null) return 0;
-        try { return n.GetValue<long>(); }
-        catch { try { return (long)n.GetValue<double>(); } catch { return 0; } }
-    }
-
     private static string? Parse(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-
-        long start = Math.Max(0, fs.Length - TailBytes);
-        fs.Seek(start, SeekOrigin.Begin);
-        using var reader = new StreamReader(fs);
-
-        // When we seeked into the middle of the file the first line is almost certainly a partial
-        // record; discard it so JSON parsing starts on a clean line boundary.
-        if (start > 0)
-            reader.ReadLine();
-
         // Lines are chronological, so the last tool_use we see is the most recent. Track only the
         // friendly phrase, overwriting as newer tool calls appear.
         string? latest = null;
 
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        foreach (var line in TranscriptScan.ReadTailLines(path, TailBytes))
         {
             // Cheap pre-filter: only assistant lines carrying a tool_use are worth parsing.
             if (!line.Contains("tool_use"))
@@ -415,14 +287,14 @@ internal sealed class TranscriptReader
 
             try
             {
-                if (JsonNode.Parse(line)?["message"]?["content"] is not JsonArray content)
+                if (TranscriptJson.ContentArray(JsonNode.Parse(line)) is not { } content)
                     continue;
 
                 foreach (var block in content)
                 {
-                    if (block?["type"]?.GetValue<string>() != "tool_use")
+                    if (TranscriptJson.BlockType(block) != "tool_use")
                         continue;
-                    var name = block["name"]?.GetValue<string>();
+                    var name = block!["name"]?.GetValue<string>();
                     if (string.IsNullOrEmpty(name))
                         continue;
                     latest = ToolSummary.Describe(name, block["input"]);
@@ -439,26 +311,15 @@ internal sealed class TranscriptReader
 
     private static bool ParseBareCommand(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-
-        long start = Math.Max(0, fs.Length - TailBytes);
-        fs.Seek(start, SeekOrigin.Begin);
-        using var reader = new StreamReader(fs);
-
-        // Seeking into the middle almost certainly lands mid-record; drop the partial first line.
-        // (If the tail spans a full window there is necessarily an assistant turn within it, so a
-        // bare command older than the window can't be the latest meaningful turn anyway.)
-        if (start > 0)
-            reader.ReadLine();
-
         // Walk chronologically and remember only which of the two meaningful kinds came last: an
         // assistant turn (the model did work) or a command invocation (the user ran a slash command).
         // Everything else — plain user prompts, command stdout, mode/title/snapshot metadata — is
         // skipped so the trailing metadata records every transcript ends with don't muddy the verdict.
+        // (If the tail spans a full window there is necessarily an assistant turn within it, so a bare
+        // command older than the window can't be the latest meaningful turn anyway.)
         bool lastWasCommand = false;
 
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        foreach (var line in TranscriptScan.ReadTailLines(path, TailBytes))
         {
             bool maybeAssistant = line.Contains("\"type\":\"assistant\"");
             bool maybeCommand = line.Contains("command-name");
@@ -509,29 +370,19 @@ internal sealed class TranscriptReader
 
     private static string? ParseTitle(string path)
     {
-        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-
         // Scan the tail first — a later /rename lands here. If none and the file spans more than one
         // window, a title set once early may be in the head, so look there before giving up.
-        return ScanWindow(fs, Math.Max(0, fs.Length - TailBytes))
-            ?? (fs.Length > TailBytes ? ScanWindow(fs, 0) : null);
+        long len = new FileInfo(path).Length;
+        return ScanWindowForTitle(TranscriptScan.ReadLinesFrom(path, Math.Max(0, len - TailBytes)))
+            ?? (len > TailBytes ? ScanWindowForTitle(TranscriptScan.ReadLinesFrom(path, 0)) : null);
     }
 
-    // Scans a window of the transcript from <paramref name="start"/> and returns the last
-    // custom-title (the /rename name) record it contains, or null.
-    private static string? ScanWindow(FileStream fs, long start)
+    // Returns the last custom-title (the /rename name) record in the given lines, or null.
+    private static string? ScanWindowForTitle(IEnumerable<string> lines)
     {
-        fs.Seek(start, SeekOrigin.Begin);
-        using var reader = new StreamReader(fs, leaveOpen: true);
-
-        // A non-zero start almost certainly lands mid-record; drop the partial first line.
-        if (start > 0)
-            reader.ReadLine();
-
         string? custom = null;
 
-        string? line;
-        while ((line = reader.ReadLine()) != null)
+        foreach (var line in lines)
         {
             // Cheap pre-filter: the /rename record type is "custom-title".
             if (!line.Contains("custom-title"))
