@@ -309,6 +309,17 @@ internal sealed class SettingsForm : Form
             l.MaximumSize = new Size(w, 0);
     }
 
+    // Pins a single control to the right edge of a fluid-width row, vertically centred, and keeps it
+    // there as the row resizes. The exact shape the section-title and notification sub-rows each
+    // repeated (a label on the left, a toggle right-aligned).
+    private void RegisterRightAlignedRow(Panel row, Control control)
+    {
+        void Position() => control.Location = new Point(row.Width - control.Width, (row.Height - control.Height) / 2);
+        row.Resize += (_, _) => Position();
+        _fluidWidth.Add((row, 0));
+        Position();
+    }
+
     // ── Getting started ─────────────────────────────────────────────────────────────
     private void BuildGettingStartedPage(FlowLayoutPanel page)
     {
@@ -940,11 +951,7 @@ internal sealed class SettingsForm : Form
         row.Controls.Add(_lockNotifyLabel);
         row.Controls.Add(_lockNotifyToggle);
 
-        void Position() =>
-            _lockNotifyToggle.Location = new Point(row.Width - _lockNotifyToggle.Width, (row.Height - _lockNotifyToggle.Height) / 2);
-        row.Resize += (_, _) => Position();
-        _fluidWidth.Add((row, 0));
-        Position();
+        RegisterRightAlignedRow(row, _lockNotifyToggle);
         return row;
     }
 
@@ -978,11 +985,7 @@ internal sealed class SettingsForm : Form
         row.Controls.Add(_remoteLinkLabel);
         row.Controls.Add(_remoteLinkToggle);
 
-        void Position() =>
-            _remoteLinkToggle.Location = new Point(row.Width - _remoteLinkToggle.Width, (row.Height - _remoteLinkToggle.Height) / 2);
-        row.Resize += (_, _) => Position();
-        _fluidWidth.Add((row, 0));
-        Position();
+        RegisterRightAlignedRow(row, _remoteLinkToggle);
         return row;
     }
 
@@ -1414,10 +1417,7 @@ internal sealed class SettingsForm : Form
         row.Controls.Add(label);
         row.Controls.Add(toggle);
 
-        void Position() => toggle.Location = new Point(row.Width - toggle.Width, (row.Height - toggle.Height) / 2);
-        row.Resize += (_, _) => Position();
-        _fluidWidth.Add((row, 0));
-        Position();
+        RegisterRightAlignedRow(row, toggle);
         return row;
     }
 
