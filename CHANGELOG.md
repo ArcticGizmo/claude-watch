@@ -9,6 +9,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.38] - 2026-06-25
+
+- Another go at making the plugin install actually stick — it was installing fine, then quietly refusing to load (a duplicate hooks declaration the newer Claude Code stopped tolerating)
+- Install and update messages now point you at `/reload-plugins`, rather than just telling you to restart your sessions
+
+---
+
 ## [v0.0.37] - 2026-06-25
 
 - Fast built-in commands like `/clear`, `/model`, and `/doctor` no longer set off a "done" (or "waiting for input") alert — if Claude didn't actually do any work, you won't get pinged for it

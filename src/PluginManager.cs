@@ -171,7 +171,7 @@ internal sealed class PluginManager
 
         return (
             true,
-            "Claude Code plugin installed. Restart any open Claude Code sessions to load it."
+            "Claude Code plugin installed. Run /reload-plugins in any open session (or restart it) to load it."
         );
     }
 
@@ -192,7 +192,7 @@ internal sealed class PluginManager
 
         return (
             true,
-            "Claude Code plugin updated. Restart any open Claude Code sessions to load it."
+            "Claude Code plugin updated. Run /reload-plugins in any open session (or restart it) to apply it."
         );
     }
 

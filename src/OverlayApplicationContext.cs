@@ -203,7 +203,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             var (ok, _) = await new PluginManager().EnableAsync();
             if (ok)
                 ShowInfoBalloon("Claude Watch",
-                    "Claude Code plugin installed. Restart open sessions to load it.", ToolTipIcon.Info);
+                    "Claude Code plugin installed. Run /reload-plugins (or restart) in open sessions to load it.", ToolTipIcon.Info);
         }
         catch { /* best-effort: skip on any failure */ }
     }
