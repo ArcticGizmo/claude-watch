@@ -233,12 +233,36 @@ elsewhere):
 > Note: `UiDispatch` was placed in `ClaudeWatch.Ui` rather than `.App` — it is UI-thread plumbing used
 > by the forms themselves, so it belongs below the App layer to avoid a Ui→App dependency.
 
-### Phase 5 — Large-form decomposition *(in scope; high churn; scheduled last)*
-1. **`OverlayForm`**: extract (a) quick-link icon load/launch + the icon cache into `QuickLink`/a
-   `QuickLinkLauncher`; (b) the dense-mode layout/drop-zone/monitor-docking into a `DenseModeController`;
-   (c) painting onto `PaintKit`/`Glyphs`/`UsageBarRenderer`. Target: the form coordinates; helpers paint.
-2. **`SettingsForm`**: lift the control factories + fluid-layout into `ThemedControls`; collapse the
-   duplicated right-align `Position()` closures; share `FlatButton`/`StyleToggle` with the other forms.
+### Phase 5 — Large-form decomposition *(in scope; high churn; scheduled last)* — ✅ DONE
+Shipped as five small, independently-building commits (build clean + 60/60 tests throughout). The UI
+is owner-drawn/eyeball-only, so each move was kept value-preserving (verbatim logic, identical
+geometry/ARGB); a runtime pass is still owed (see Phase Future).
+
+1. **`OverlayForm`** (1,905 → 1,525 lines):
+   - *(5a)* quick-link icon load/cache + launch/focus → `ClaudeWatch.Ui.QuickLinkLauncher`. The cache
+     key keeps its original `0x01` separators verbatim; `OpenArtifact` inlines its own shell-open.
+   - *(5b)* the duplicated usage-bar drawing (overlay `DrawUsageBar` ≡ settings `UsageBarsControl.DrawBar`)
+     → one `ClaudeWatch.Ui.UsageBarRenderer.Draw`, every differing width/font/shade threaded through so
+     both render pixel-identically. (This is the `UsageBarRenderer` deferred from Phase 3.)
+   - *(5c)* the whole dense-mode concern (state machine, docked-edge/monitor geometry, drag-to-redock
+     drop lanes, transitions, auto-close timer, closed-strip painting) → `ClaudeWatch.Ui.DenseModeController`,
+     driven through a small `IDenseHost` seam. The form coordinates; the controller owns dense.
+   - Painting already sat on `PaintKit`/`Glyphs` from Phase 3.
+2. **`SettingsForm` + the other windows**:
+   - *(5d)* `ClaudeWatch.Ui.ThemedControls.FlatButton` + `StyleToggle` — the dark flat button and its
+     selected-state recolour were re-implemented in `SettingsForm`, `HistoryViewerForm`, `StatsForm`,
+     and `QuickLinkDialog`; all four now route through the shared pair (QuickLinkDialog's `MakeButton`
+     was byte-identical and was removed). Trivial consistency drive-by (policy §6.2): the shared button
+     sets `MouseDownBackColor`, so the history/stats buttons gain that pressed shade.
+   - *(5e)* the three single-toggle right-align `Position()` closures (`TitleRow`, lock-notify,
+     remote-link) collapsed onto one `RegisterRightAlignedRow` helper.
+   - **Deliberately not done — lifting `SettingsForm`'s private control factories + fluid-width system
+     into a shared toolkit.** Assessed during the work: those factories have *no second consumer* (the
+     other windows lay labels out with absolute `Bounds`, not the fluid `AutoSize` factories), so the
+     move would be pure relocation that *spreads one form across two files* with zero cross-form dedup,
+     on an eyeball-only surface. The genuine cross-form duplication (`FlatButton`/`StyleToggle`) and the
+     in-form `Position()` duplication were both removed; the rest stays put. Revisit only if a second
+     window ever needs the fluid factories.
 
 ### Phase 6 — Namespace / folder migration
 Move the existing files into `Data/` `Ui/` `App/` folders under `src/` and convert them to the
@@ -264,9 +288,16 @@ the refactored paths — verdict PASS). Carry-forward items:
   *Candidate fix:* route `WindowHost.ShowOrFocus`'s focus step through the existing
   `NativeMethods.FocusWindow` (the `AttachThreadInput` lift used for terminal focus) instead of plain
   `Activate()`. Low priority / cosmetic.
-- **Deferred from Phase 3** (recorded above, restated here as backlog): `UsageBarRenderer` (shared
-  overlay/settings usage-bar drawing — value-preserving but needs an eyeball), and `ToolWindow` base
-  form for the three dark popups (folded into Phase 5).
+- **Phase 5 owes a runtime eyeball pass** (the UI is owner-drawn / eyeball-only). All five 5x commits
+  build clean with 60/60 tests, but the visual surfaces they touch need a look on a real (ideally
+  multi-monitor) setup: the overlay usage bars (5b), the shared flat buttons across Settings/History/
+  Stats/QuickLink dialogs (5d), and especially **dense mode** (5c) — Alt+Shift+W toggle, hover open/close,
+  the closed strip's counts, and drag-to-redock across monitors/edges. The logic was moved verbatim, so
+  this is a confirmation pass, not a debugging one.
+- **`ToolWindow` base form** for the three dark popups (`PopoverMenu`, `UsageTooltipForm`, `QrCodeForm`):
+  still deferred. Loosely "folded into Phase 5" by the Phase-3 note, but it wasn't part of the OverlayForm/
+  SettingsForm decomposition that Phase 5 actually executed; left as a standalone follow-up.
+- **`UsageBarRenderer`** — ✅ done in Phase 5b (was deferred from Phase 3).
 
 ## 5. Risks & mitigations
 - **No existing tests + live append-only files.** Phase 0 exists precisely to baseline behaviour
