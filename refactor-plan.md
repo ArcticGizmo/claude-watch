@@ -214,12 +214,24 @@ elsewhere):
   distinct values under new names (low dedup value) and flattens the overlay's readable semantic
   names; not pursued. The genuine duplicates (the colour *functions* above) are gone.
 
-### Phase 4 — App orchestration *(medium risk)*
-1. Add `UiDispatch.RunThenPost`; apply at the 4 off-thread sites.
-2. Add `WindowHost.ShowOrFocus`; collapse the three reused-window methods (keep Exit/Dispose/update wiring).
-3. Extract `NotificationService` from `OverlayApplicationContext` (balloon + chime + ntfy + AFK/lock
-   gating from `OnNeedsAttention`/`OnAwaitingInput`/`MaybeSendExternal`). The context becomes a thin
-   wiring shell.
+### Phase 4 — App orchestration *(medium risk)* — ✅ DONE
+1. **`UiDispatch`** (`src/Ui/UiDispatch.cs`) — `Post` / `RunThenPost`, the off-thread→guarded-marshal
+   pattern; applied at the 4 sites (`OverlayApplicationContext.RefreshUsage`/`RefreshTodayStats`,
+   `StatsForm.RefreshStats`, `HistoryViewerForm.RefreshEntries`). *(4a)*
+2. **`NotificationService`** (`src/App/NotificationService.cs`) — extracted balloon + chime + ntfy +
+   AFK/lock gating + the last-notified-pid state out of `OverlayApplicationContext` (~120 lines). The
+   context's attention handlers now flash the overlay and call `Notify`; update/plugin flows raise
+   balloons via `ShowInfo`. *(4b)*
+3. **`WindowHost.ShowOrFocus`** (`src/App/WindowHost.cs`) — collapsed the three reused-window methods
+   (`OpenSettings`/`OpenHistoryViewer`/`OpenStats`) onto one helper (`beforeShow` for one-time wiring,
+   `refresh` for "point at current data", run on both reuse and create paths). `StatsForm` no longer
+   self-loads in `OnShown` — the `WindowHost` refresh kicks the first load on open. Exit/Dispose/update
+   teardown wiring is unchanged. *(4c)*
+4. Verified: behaviour-preserving; Release build clean + 60/60 tests throughout (the running app held a
+   lock on the Debug exe, so verification used the Release config).
+
+> Note: `UiDispatch` was placed in `ClaudeWatch.Ui` rather than `.App` — it is UI-thread plumbing used
+> by the forms themselves, so it belongs below the App layer to avoid a Ui→App dependency.
 
 ### Phase 5 — Large-form decomposition *(in scope; high churn; scheduled last)*
 1. **`OverlayForm`**: extract (a) quick-link icon load/launch + the icon cache into `QuickLink`/a

@@ -86,7 +86,7 @@ internal sealed class StatsForm : Form
         base.OnShown(e);
         NativeMethods.UseDarkScrollBars(_scroll.Handle);
         LayoutToolbar();
-        RefreshStats();   // kick the first load
+        // The owner (WindowHost refresh) kicks the first stats load on open.
     }
 
     /// <summary>Recomputes the current scope's report off the UI thread, then repaints. Safe to call

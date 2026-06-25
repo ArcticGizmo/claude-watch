@@ -212,30 +212,23 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // Opens (or re-focuses) the settings window, wiring it to the shared state and callbacks.
     private void OpenSettings()
     {
-        if (_settingsForm is { IsDisposed: false })
-        {
-            if (_settingsForm.WindowState == FormWindowState.Minimized)
-                _settingsForm.WindowState = FormWindowState.Normal;
-            _settingsForm.Activate();
-            _settingsForm.BringToFront();
-            return;
-        }
-
-        _settingsForm = new SettingsForm(_settings, _usageMonitor, _lastUsage);
-        _settingsForm.UsageEnabledChanged    += SetUsageEnabled;
-        _settingsForm.ExpectedRateChanged    += SetExpectedRateEnabled;
-        _settingsForm.ContextPressureChanged += SetContextPressureEnabled;
-        _settingsForm.ContextThresholdsChanged += SetContextThresholds;
-        _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
-        _settingsForm.TestNotificationRequested += _notifications.ShowTest;
-        _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
-        _settingsForm.TestExternalNotificationRequested   += () => _ = _notifications.SendExternalTestAsync();
-        _settingsForm.QuickLinksChanged       += SetQuickLinks;
-        _settingsForm.UpsideDownQuickLinksChanged += SetUpsideDownQuickLinks;
-        _settingsForm.OpenStatsRequested      += OpenStats;
-        _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
-        _settingsForm.Show();
-        _settingsForm.Activate();
+        _settingsForm = WindowHost.ShowOrFocus(_settingsForm,
+            () => new SettingsForm(_settings, _usageMonitor, _lastUsage),
+            () => _settingsForm = null,
+            beforeShow: f =>
+            {
+                f.UsageEnabledChanged    += SetUsageEnabled;
+                f.ExpectedRateChanged    += SetExpectedRateEnabled;
+                f.ContextPressureChanged += SetContextPressureEnabled;
+                f.ContextThresholdsChanged += SetContextThresholds;
+                f.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
+                f.TestNotificationRequested += _notifications.ShowTest;
+                f.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
+                f.TestExternalNotificationRequested   += () => _ = _notifications.SendExternalTestAsync();
+                f.QuickLinksChanged       += SetQuickLinks;
+                f.UpsideDownQuickLinksChanged += SetUpsideDownQuickLinks;
+                f.OpenStatsRequested      += OpenStats;
+            });
     }
 
     // Opens (or re-focuses) the history viewer and points it at the given session. A null sessionId
@@ -243,43 +236,26 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // sessions so active indicators are right immediately.
     private void OpenHistoryViewer(string? sessionId)
     {
-        if (_historyForm is { IsDisposed: false })
-        {
-            if (_historyForm.WindowState == FormWindowState.Minimized)
-                _historyForm.WindowState = FormWindowState.Normal;
-            _historyForm.SetActiveSessions(_sessions);
-            _historyForm.SelectSession(sessionId);
-            _historyForm.Activate();
-            _historyForm.BringToFront();
-            return;
-        }
-
-        _historyForm = new HistoryViewerForm();
-        _historyForm.FormClosed += (_, _) => _historyForm = null;
-        _historyForm.Show();
-        _historyForm.SetActiveSessions(_sessions);
-        _historyForm.SelectSession(sessionId);
-        _historyForm.Activate();
+        _historyForm = WindowHost.ShowOrFocus(_historyForm,
+            () => new HistoryViewerForm(),
+            () => _historyForm = null,
+            refresh: f =>
+            {
+                f.SetActiveSessions(_sessions);
+                f.SelectSession(sessionId);
+            });
     }
 
     // Opens (or re-focuses) the stats window and refreshes today's figures. A single reused instance,
     // like the settings and history windows.
     private void OpenStats()
     {
-        if (_statsForm is { IsDisposed: false })
-        {
-            if (_statsForm.WindowState == FormWindowState.Minimized)
-                _statsForm.WindowState = FormWindowState.Normal;
-            _statsForm.RefreshStats();
-            _statsForm.Activate();
-            _statsForm.BringToFront();
-            return;
-        }
-
-        _statsForm = new StatsForm(_settings);
-        _statsForm.FormClosed += (_, _) => _statsForm = null;
-        _statsForm.Show();           // OnShown kicks the first stats load
-        _statsForm.Activate();
+        // refresh runs on both the reuse and create paths, so it also kicks the first load on open
+        // (StatsForm no longer self-loads in OnShown).
+        _statsForm = WindowHost.ShowOrFocus(_statsForm,
+            () => new StatsForm(_settings),
+            () => _statsForm = null,
+            refresh: f => f.RefreshStats());
     }
 
     // Toggles the usage bars. Disabling stops all polling so no OAuth query ever goes out;
