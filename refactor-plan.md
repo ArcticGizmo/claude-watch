@@ -247,6 +247,27 @@ using-directives. (New files added in Phases 0–5 are already in their final na
 only moves the pre-existing 31.) Done last so the logic refactors never touch a file twice. Verify the
 build and a full app run after the move.
 
+### Phase Future — backlog & follow-ups (so we don't forget)
+From the Phase 1–4 runtime verification (launched the built tray app on a 3-monitor setup; overlay,
+usage bars, mode badges, live activity/thermometer, and the history viewer all rendered correctly via
+the refactored paths — verdict PASS). Carry-forward items:
+
+- **Notification dispatch not exercised live.** `NotificationService` (4b) constructs cleanly at
+  startup, but a desktop balloon / chime / external push needs a real busy→idle session transition,
+  which couldn't be induced externally during verification. *To do:* click each per-type **"Test"** in
+  Settings (now wired to `NotificationService.ShowTest` / `SendExternalTestAsync`) and ideally watch one
+  real "done" notification fire, to confirm the extraction end-to-end.
+- **Window focus doesn't beat the foreground lock.** Opening Settings/History/Stats via `WindowHost`
+  uses `Form.Activate()`, which (Windows foreground-lock) doesn't reliably raise the window above a
+  focused app on another monitor — observed: the history window opened *behind* VS Code. This is
+  **pre-existing** (the old `Open*` methods called the same `Activate()`), not a refactor regression.
+  *Candidate fix:* route `WindowHost.ShowOrFocus`'s focus step through the existing
+  `NativeMethods.FocusWindow` (the `AttachThreadInput` lift used for terminal focus) instead of plain
+  `Activate()`. Low priority / cosmetic.
+- **Deferred from Phase 3** (recorded above, restated here as backlog): `UsageBarRenderer` (shared
+  overlay/settings usage-bar drawing — value-preserving but needs an eyeball), and `ToolWindow` base
+  form for the three dark popups (folded into Phase 5).
+
 ## 5. Risks & mitigations
 - **No existing tests + live append-only files.** Phase 0 exists precisely to baseline behaviour
   before Phase 2. The transcript parsers are the only genuinely risky area.
