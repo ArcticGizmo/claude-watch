@@ -277,17 +277,10 @@ internal sealed class HistoryViewerForm : Form
         if (_dropdown.Items.Count == 0)
             ShowMessage("Loading session history…");
 
-        Task.Run(() => SessionHistory.ListAll(ids)).ContinueWith(t =>
-        {
-            var list = t.IsCompletedSuccessfully ? t.Result : new List<HistoryEntry>();
-            try
-            {
-                if (IsHandleCreated && !IsDisposed)
-                    BeginInvoke((Action)(() => PopulateDropdown(list, keep)));
-            }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) { }
-        });
+        UiDispatch.RunThenPost(this,
+            () => SessionHistory.ListAll(ids),
+            list => PopulateDropdown(list, keep),
+            new List<HistoryEntry>());
     }
 
     private void PopulateDropdown(List<HistoryEntry> list, string? keep)

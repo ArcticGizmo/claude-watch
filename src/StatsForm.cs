@@ -99,23 +99,16 @@ internal sealed class StatsForm : Form
 
         var today = DateOnly.FromDateTime(DateTime.Now);
         var scope = _scope;
-        Task.Run(() => LoadScope(scope, today)).ContinueWith(t =>
-        {
-            var (report, range) = t.IsCompletedSuccessfully ? t.Result : (StatsReport.Empty(today), (RangeReport?)null);
-            try
+        UiDispatch.RunThenPost<(StatsReport report, RangeReport? range)>(this,
+            () => LoadScope(scope, today),
+            result =>
             {
-                if (IsHandleCreated && !IsDisposed)
-                    BeginInvoke((Action)(() =>
-                    {
-                        _report = report;
-                        _range = range;
-                        _loading = false;
-                        Relayout();
-                    }));
-            }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) { }
-        });
+                _report = result.report;
+                _range = result.range;
+                _loading = false;
+                Relayout();
+            },
+            (StatsReport.Empty(today), null));
     }
 
     private static (StatsReport report, RangeReport? range) LoadScope(Scope scope, DateOnly today)

@@ -1,3 +1,4 @@
+using ClaudeWatch.Ui;
 using Velopack;
 using Velopack.Sources;
 
@@ -336,18 +337,12 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         if (!_settings.ShowUsage) return;
         var info = await _usageMonitor.FetchAsync();
         _lastUsage = info;
-        try
+        UiDispatch.Post(_overlay, () =>
         {
-            if (_overlay.IsHandleCreated && !_overlay.IsDisposed)
-                _overlay.BeginInvoke((Action)(() =>
-                {
-                    _overlay.UpdateUsage(info);
-                    if (_settingsForm is { IsDisposed: false })
-                        _settingsForm.UpdateUsage(info);
-                }));
-        }
-        catch (ObjectDisposedException) { }
-        catch (InvalidOperationException) { }
+            _overlay.UpdateUsage(info);
+            if (_settingsForm is { IsDisposed: false })
+                _settingsForm.UpdateUsage(info);
+        });
     }
 
     // Recomputes today's headline stats off the UI thread (scanning transcripts can touch several
@@ -363,17 +358,10 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _statsItem.Visible = true;
 
         var today = DateOnly.FromDateTime(DateTime.Now);
-        Task.Run(() => SessionStatsService.ForDay(today)).ContinueWith(t =>
-        {
-            var stats = t.IsCompletedSuccessfully ? t.Result : DayStats.Empty(today);
-            try
-            {
-                if (_overlay.IsHandleCreated && !_overlay.IsDisposed)
-                    _overlay.BeginInvoke((Action)(() => _statsItem.Text = stats.TraySummary()));
-            }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) { }
-        });
+        UiDispatch.RunThenPost(_overlay,
+            () => SessionStatsService.ForDay(today),
+            stats => _statsItem.Text = stats.TraySummary(),
+            DayStats.Empty(today));
     }
 
     private void OnSessionsChanged(IReadOnlyList<ClaudeSession> sessions)
