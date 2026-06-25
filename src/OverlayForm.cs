@@ -345,23 +345,12 @@ internal sealed class OverlayForm : Form
         // Icons come from a process-wide cache keyed by (name, path, size). Resolving an app's icon
         // can be costly (Start Menu lookup), and this runs on every list edit, so unchanged links must
         // be a cheap cache hit. The cache owns the bitmaps, so we never dispose them here.
-        _quickLinkIcons   = enabled.Select(l => CachedIcon(l, 18)).ToList();
+        _quickLinkIcons   = enabled.Select(l => QuickLinkLauncher.CachedIcon(l, 18)).ToList();
         _quickLinks       = enabled;
         _hoveredQuickLink = -1;
 
         RelayoutWindow();
         Invalidate();
-    }
-
-    private static readonly Dictionary<string, Bitmap?> _iconCache = new();
-
-    private static Bitmap? CachedIcon(QuickLink link, int size)
-    {
-        string key = $"{link.Name}{link.ExePath}{size}";
-        if (_iconCache.TryGetValue(key, out var cached)) return cached;
-        var icon = LoadQuickLinkIcon(link, size);
-        _iconCache[key] = icon;
-        return icon;
     }
 
     // Whether external (ntfy) notifications are switched on globally. Controls whether the per-session
@@ -1139,86 +1128,6 @@ internal sealed class OverlayForm : Form
         return Color.FromArgb((int)(r * 255), (int)(g * 255), (int)(b * 255));
     }
 
-    private static Bitmap? LoadAppIcon(string? exePath, int size)
-    {
-        if (string.IsNullOrWhiteSpace(exePath)) return null;
-
-        // The shell image factory renders a crisp, transparent icon for an ordinary exe; fall back to
-        // the classic exe-icon extraction if it can't.
-        using var src = ShellIcon.Load(exePath, Math.Max(size, 32)) ?? ExtractClassicIcon(exePath);
-        return src == null ? null : ScaleTo(src, size);
-    }
-
-    private static Bitmap? ExtractClassicIcon(string exePath)
-    {
-        try
-        {
-            using var icon = Icon.ExtractAssociatedIcon(exePath);
-            return icon?.ToBitmap();
-        }
-        catch { return null; }
-    }
-
-    // The icon for a quick link. An explicit path takes precedence: we show that program's own icon,
-    // even if it's a placeholder. With no path, prefer the icon Windows shows for the app in the Start
-    // Menu (matched by name) — for Store / MSIX apps that's the real package logo, which the bare alias
-    // exe doesn't carry — then a discovered well-known exe, else null (the strip draws initials).
-    private static Bitmap? LoadQuickLinkIcon(QuickLink link, int size)
-    {
-        if (!string.IsNullOrWhiteSpace(link.ExePath))
-            return LoadAppIcon(link.ExePath, size);
-
-        int px = Math.Max(size, 32);  // render larger than the strip, then downscale for crispness
-        using var fromStartMenu = ShellIcon.LoadStartMenuByName(link.Name, px);
-        if (fromStartMenu != null) return ScaleTo(fromStartMenu, size);
-
-        return LoadAppIcon(link.ResolveExe(), size);
-    }
-
-    private static Bitmap ScaleTo(Bitmap src, int size)
-    {
-        var result = new Bitmap(size, size);
-        using var ig = Graphics.FromImage(result);
-        ig.InterpolationMode = InterpolationMode.HighQualityBicubic;
-        ig.DrawImage(src, 0, 0, size, size);
-        return result;
-    }
-
-    // Focuses the app's existing window if it's running, otherwise launches it. An explicit path is
-    // launched directly; with no path we launch by Start Menu identity (reliable for Store / MSIX apps
-    // that have no real exe to point at), falling back to a discovered well-known exe.
-    private static void LaunchOrFocus(QuickLink link)
-    {
-        try
-        {
-            foreach (var p in System.Diagnostics.Process.GetProcessesByName(link.ProcessName()))
-            {
-                if (p.MainWindowHandle != IntPtr.Zero)
-                {
-                    NativeMethods.FocusWindow(p.MainWindowHandle);
-                    return;
-                }
-            }
-
-            if (!string.IsNullOrWhiteSpace(link.ExePath)) { StartFile(link.ExePath); return; }
-
-            var appId = ShellIcon.StartMenuAppId(link.Name);
-            if (appId != null)
-            {
-                System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{appId}"));
-                return;
-            }
-
-            var exe = link.ResolveExe();
-            if (exe != null) StartFile(exe);
-        }
-        catch { }
-    }
-
-    private static void StartFile(string path) =>
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
-
     private void DrawRow(Graphics g, int rowIdx)
     {
         if (_rows[rowIdx].IsSubAgent)
@@ -1615,7 +1524,7 @@ internal sealed class OverlayForm : Form
                 }
                 else if (HitTestQuickLink(e.Location) is var ql && ql >= 0)
                 {
-                    LaunchOrFocus(_quickLinks[ql]);
+                    QuickLinkLauncher.LaunchOrFocus(_quickLinks[ql]);
                 }
                 else if (!_dense && e.Y < HeaderHeight && _sessions.Count > 0)
                 {
@@ -1751,7 +1660,7 @@ internal sealed class OverlayForm : Form
     private static void OpenArtifact(Artifact artifact)
     {
         if (!string.IsNullOrWhiteSpace(artifact.Url))
-            StartFile(artifact.Url);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(artifact.Url) { UseShellExecute = true });
     }
 
     // ── Context menu ─────────────────────────────────────────────────────────
