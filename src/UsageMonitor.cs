@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
+using ClaudeWatch.Data;
 
 namespace ClaudeWatch;
 
@@ -20,11 +21,6 @@ internal sealed class UsageMonitor
     private const string FallbackVersion = "2.1.0";
 
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
-
-    private readonly string _claudeDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude"
-    );
 
     // The most recent successful reading, so a failed fetch can still surface last-known values.
     private UsageInfo _last = UsageInfo.Empty;
@@ -93,7 +89,7 @@ internal sealed class UsageMonitor
 
     private string? ReadAccessToken()
     {
-        var path = Path.Combine(_claudeDir, ".credentials.json");
+        var path = ClaudePaths.CredentialsFile;
         if (!File.Exists(path))
             return null;
 
@@ -116,7 +112,7 @@ internal sealed class UsageMonitor
     {
         try
         {
-            var dir = Path.Combine(_claudeDir, "sessions");
+            var dir = ClaudePaths.SessionsDir;
             if (!Directory.Exists(dir))
                 return FallbackVersion;
 

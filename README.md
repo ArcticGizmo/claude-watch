@@ -1,8 +1,15 @@
-# <img src="./src/icon.png" style="margin-bottom: -0.25rem" /> Claude Watch
+<h1 align="center">Claude Watch</h1>
+<p align="center">
+ <img src="./landing-icon.png" width="150"  />
+</p>
 
-**Keep an eye on every Claude Code session from one floating panel.**
+<p align="center">
+<strong>Keep an eye on every Claude Code session from one floating panel.</strong>
+</p>
 
-Claude Watch is a Windows system-tray app that watches your active Claude Code sessions and surfaces what each one is doing — at a glance, without alt-tabbing through a dozen terminals. When a session finishes, gets stuck on a permission prompt, or needs you, you'll know. 
+<br>
+
+Claude Watch is a Windows system-tray app that watches your active Claude Code sessions and surfaces what each one is doing — at a glance, without alt-tabbing through a dozen terminals. When a session finishes, gets stuck on a permission prompt, or needs you, you'll know.
 
 Already know you want it? [Skip the details and install it ▼](#install)
 

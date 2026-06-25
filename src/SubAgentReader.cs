@@ -1,5 +1,5 @@
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
+using ClaudeWatch.Data;
 
 namespace ClaudeWatch;
 
@@ -19,12 +19,6 @@ namespace ClaudeWatch;
 /// </summary>
 internal sealed class SubAgentReader
 {
-    private readonly string _projectsDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude",
-        "projects"
-    );
-
     private readonly Dictionary<string, CacheEntry> _cache = new();
     private readonly Dictionary<string, AgentRunState> _agentCache = new();
 
@@ -46,7 +40,7 @@ internal sealed class SubAgentReader
         if (string.IsNullOrEmpty(sessionId))
             return [];
 
-        var path = ResolveTranscript(sessionId, cwd);
+        var path = TranscriptLocator.Resolve(sessionId, cwd);
         if (path == null)
             return [];
 
@@ -211,34 +205,6 @@ internal sealed class SubAgentReader
         return lastAssistantHadToolUse; // assistant ended on a tool_use -> awaiting its result
     }
 
-    private string? ResolveTranscript(string sessionId, string cwd)
-    {
-        // Claude Code encodes the cwd into the project dir name by replacing every
-        // non-alphanumeric character with '-' (e.g. C:\a\b.c -> C--a-b-c). Try that first.
-        if (!string.IsNullOrEmpty(cwd))
-        {
-            var encoded = Regex.Replace(cwd, "[^A-Za-z0-9]", "-");
-            var direct = Path.Combine(_projectsDir, encoded, sessionId + ".jsonl");
-            if (File.Exists(direct))
-                return direct;
-        }
-
-        // Fallback: the sessionId is a UUID, so a scan across project dirs is unambiguous and
-        // covers any cwd-encoding edge case the rule above doesn't capture.
-        try
-        {
-            foreach (var dir in Directory.EnumerateDirectories(_projectsDir))
-            {
-                var candidate = Path.Combine(dir, sessionId + ".jsonl");
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-        }
-        catch { }
-
-        return null;
-    }
-
     private static IReadOnlyList<SubAgent> Parse(string path)
     {
         // Collect every Task tool_use and the set of tool_use ids that already have a result;
@@ -269,7 +235,7 @@ internal sealed class SubAgentReader
                     var name = type == "tool_use" ? block!["name"]?.GetValue<string>() : null;
                     if (name is "Agent" or "Task")
                     {
-                        var id = block["id"]?.GetValue<string>();
+                        var id = block!["id"]?.GetValue<string>();
                         if (id == null)
                             continue;
                         var input = block["input"];

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using ClaudeWatch.Data;
 
 namespace ClaudeWatch;
 
@@ -119,10 +120,6 @@ internal static class StatsFormat
 /// </summary>
 internal static class SessionStatsService
 {
-    private static readonly string ProjectsDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude", "projects");
-
     // Gaps longer than this between a session's records are treated as "walked away" and capped, so
     // active time measures engagement. Defaults to SessionMonitor's NeedsAttention window (5 minutes);
     // configurable from settings (see AppSettings.StatsActiveIdleMinutes), applied at startup and when
@@ -160,32 +157,18 @@ internal static class SessionStatsService
     // (the all-time scope) to skip the filter and enumerate every transcript.
     private static IEnumerable<string> EnumerateCandidateTranscripts(DateTime? windowStart)
     {
-        if (!Directory.Exists(ProjectsDir))
-            yield break;
-
-        IEnumerable<string> dirs;
-        try { dirs = Directory.EnumerateDirectories(ProjectsDir); }
-        catch { yield break; }
-
-        foreach (var dir in dirs)
+        foreach (var file in TranscriptLocator.EnumerateTranscripts())
         {
-            IEnumerable<string> files;
-            try { files = Directory.EnumerateFiles(dir, "*.jsonl"); }
-            catch { continue; }
-
-            foreach (var file in files)
+            if (windowStart == null)
             {
-                if (windowStart == null)
-                {
-                    yield return file;
-                    continue;
-                }
-                DateTime mtime;
-                try { mtime = File.GetLastWriteTime(file); }
-                catch { continue; }
-                if (mtime >= windowStart)
-                    yield return file;
+                yield return file;
+                continue;
             }
+            DateTime mtime;
+            try { mtime = File.GetLastWriteTime(file); }
+            catch { continue; }
+            if (mtime >= windowStart)
+                yield return file;
         }
     }
 

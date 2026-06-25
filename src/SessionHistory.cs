@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ClaudeWatch.Data;
 
 namespace ClaudeWatch;
 
@@ -345,12 +346,6 @@ internal sealed record HistoryEntry(
 /// </summary>
 internal static class SessionHistory
 {
-    private static readonly string ProjectsDir = System.IO.Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude",
-        "projects"
-    );
-
     // Project name keyed by transcript path — the cwd inside a transcript never changes, so caching
     // avoids reopening every file on each (frequent) re-list. Listing runs on a background thread, so
     // guard the cache.
@@ -361,36 +356,22 @@ internal static class SessionHistory
     public static List<HistoryEntry> ListAll(IReadOnlySet<string> activeSessionIds)
     {
         var entries = new List<HistoryEntry>();
-        try
+        foreach (var file in TranscriptLocator.EnumerateTranscripts())
         {
-            if (!Directory.Exists(ProjectsDir))
-                return entries;
-
-            foreach (var dir in Directory.EnumerateDirectories(ProjectsDir))
+            try
             {
-                IEnumerable<string> files;
-                try { files = Directory.EnumerateFiles(dir, "*.jsonl"); }
-                catch { continue; }
-
-                foreach (var file in files)
-                {
-                    try
-                    {
-                        var sessionId = System.IO.Path.GetFileNameWithoutExtension(file);
-                        var (project, cwd) = ResolveProject(file, dir);
-                        entries.Add(new HistoryEntry(
-                            sessionId,
-                            project,
-                            cwd,
-                            file,
-                            File.GetLastWriteTime(file),
-                            activeSessionIds.Contains(sessionId)));
-                    }
-                    catch { }
-                }
+                var sessionId = System.IO.Path.GetFileNameWithoutExtension(file);
+                var (project, cwd) = ResolveProject(file, System.IO.Path.GetDirectoryName(file) ?? "");
+                entries.Add(new HistoryEntry(
+                    sessionId,
+                    project,
+                    cwd,
+                    file,
+                    File.GetLastWriteTime(file),
+                    activeSessionIds.Contains(sessionId)));
             }
+            catch { }
         }
-        catch { }
 
         return entries
             .OrderByDescending(e => e.IsActive)

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
+using ClaudeWatch.Data;
 
 namespace ClaudeWatch;
 
@@ -19,12 +19,6 @@ namespace ClaudeWatch;
 internal sealed class TranscriptReader
 {
     private const int TailBytes = 32 * 1024;
-
-    private readonly string _projectsDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude",
-        "projects"
-    );
 
     private readonly Dictionary<string, CacheEntry> _cache = new();
     private readonly Dictionary<string, CacheEntry> _titleCache = new();
@@ -46,7 +40,7 @@ internal sealed class TranscriptReader
         if (string.IsNullOrEmpty(sessionId))
             return null;
 
-        var path = ResolveTranscript(sessionId, cwd);
+        var path = TranscriptLocator.Resolve(sessionId, cwd);
         if (path == null)
             return null;
 
@@ -90,7 +84,7 @@ internal sealed class TranscriptReader
         if (string.IsNullOrEmpty(sessionId))
             return false;
 
-        var path = ResolveTranscript(sessionId, cwd);
+        var path = TranscriptLocator.Resolve(sessionId, cwd);
         if (path == null)
             return false;
 
@@ -127,7 +121,7 @@ internal sealed class TranscriptReader
         if (string.IsNullOrEmpty(sessionId))
             return null;
 
-        var path = ResolveTranscript(sessionId, cwd);
+        var path = TranscriptLocator.Resolve(sessionId, cwd);
         if (path == null)
             return null;
 
@@ -162,7 +156,7 @@ internal sealed class TranscriptReader
         if (string.IsNullOrEmpty(sessionId))
             return (null, ModelContext.DefaultWindow);
 
-        var path = ResolveTranscript(sessionId, cwd);
+        var path = TranscriptLocator.Resolve(sessionId, cwd);
         if (path == null)
             return (null, ModelContext.DefaultWindow);
 
@@ -193,7 +187,7 @@ internal sealed class TranscriptReader
         if (string.IsNullOrEmpty(sessionId))
             return [];
 
-        var path = ResolveTranscript(sessionId, cwd);
+        var path = TranscriptLocator.Resolve(sessionId, cwd);
         if (path == null)
             return [];
 
@@ -355,9 +349,7 @@ internal sealed class TranscriptReader
             candidates.Add(Path.Combine(cwd, ".claude", "settings.local.json"));
             candidates.Add(Path.Combine(cwd, ".claude", "settings.json"));
         }
-        candidates.Add(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "settings.json"));
+        candidates.Add(ClaudePaths.UserSettingsFile);
 
         foreach (var path in candidates)
         {
@@ -395,63 +387,6 @@ internal sealed class TranscriptReader
         if (n == null) return 0;
         try { return n.GetValue<long>(); }
         catch { try { return (long)n.GetValue<double>(); } catch { return 0; } }
-    }
-
-    /// <summary>Returns the full path to a session's .jsonl transcript, or null if not found.</summary>
-    public static string? FindTranscript(string sessionId, string cwd)
-    {
-        var projectsDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".claude", "projects");
-
-        if (!string.IsNullOrEmpty(cwd))
-        {
-            var encoded = Regex.Replace(cwd, "[^A-Za-z0-9]", "-");
-            var direct = Path.Combine(projectsDir, encoded, sessionId + ".jsonl");
-            if (File.Exists(direct))
-                return direct;
-        }
-
-        try
-        {
-            foreach (var dir in Directory.EnumerateDirectories(projectsDir))
-            {
-                var candidate = Path.Combine(dir, sessionId + ".jsonl");
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-        }
-        catch { }
-
-        return null;
-    }
-
-    private string? ResolveTranscript(string sessionId, string cwd)
-    {
-        // Claude Code encodes the cwd into the project dir name by replacing every
-        // non-alphanumeric character with '-' (e.g. C:\a\b.c -> C--a-b-c). Try that first.
-        if (!string.IsNullOrEmpty(cwd))
-        {
-            var encoded = Regex.Replace(cwd, "[^A-Za-z0-9]", "-");
-            var direct = Path.Combine(_projectsDir, encoded, sessionId + ".jsonl");
-            if (File.Exists(direct))
-                return direct;
-        }
-
-        // Fallback: the sessionId is a UUID, so a scan across project dirs is unambiguous and
-        // covers any cwd-encoding edge case the rule above doesn't capture.
-        try
-        {
-            foreach (var dir in Directory.EnumerateDirectories(_projectsDir))
-            {
-                var candidate = Path.Combine(dir, sessionId + ".jsonl");
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-        }
-        catch { }
-
-        return null;
     }
 
     private static string? Parse(string path)

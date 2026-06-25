@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using ClaudeWatch.Data;
 
 namespace ClaudeWatch;
 
@@ -8,11 +9,7 @@ internal sealed class SessionMonitor : IDisposable
     private const int NeedsAttentionMinutes = 5;
     private const int DebounceMs = 150;
 
-    private readonly string _sessionsDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        ".claude",
-        "sessions"
-    );
+    private readonly string _sessionsDir = ClaudePaths.SessionsDir;
 
     private readonly Dictionary<string, string> _lastRawStatus = new();
     private readonly Dictionary<string, DateTime> _idleSince = new();

@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using ClaudeWatch.Data;
 
 namespace ClaudeWatch;
 
@@ -1850,7 +1851,7 @@ internal sealed class OverlayForm : Form
             var txSession = _rows[row].Session;
             items.Add(("Open transcript in VS Code", () =>
             {
-                var path = TranscriptReader.FindTranscript(txSession.SessionId, txSession.Cwd);
+                var path = TranscriptLocator.Resolve(txSession.SessionId, txSession.Cwd);
                 if (path != null)
                     System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("code", $"\"{path}\"") { UseShellExecute = true });
             }));

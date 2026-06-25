@@ -3,6 +3,7 @@ namespace ClaudeWatch;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using ClaudeWatch.Data;
 
 /// <summary>
 /// What action (if any) the user can take on the claude-watch Claude Code plugin, derived from the
@@ -43,15 +44,11 @@ internal sealed class PluginManager
     private const string PluginName = "claude-watch";
     private const string PluginId = PluginName + "@" + MarketplaceName;
 
-    private static readonly string UserHome = Environment.GetFolderPath(
-        Environment.SpecialFolder.UserProfile
-    );
-
-    private static string SettingsPath => Path.Combine(UserHome, ".claude", "settings.json");
+    private static string SettingsPath => ClaudePaths.UserSettingsFile;
     private static string InstalledPluginsPath =>
-        Path.Combine(UserHome, ".claude", "plugins", "installed_plugins.json");
+        Path.Combine(ClaudePaths.PluginsDir, "installed_plugins.json");
     private static string MarketplaceClonePath =>
-        Path.Combine(UserHome, ".claude", "plugins", "marketplaces", MarketplaceName);
+        Path.Combine(ClaudePaths.PluginsDir, "marketplaces", MarketplaceName);
 
     /// <summary>The slash commands a user can paste into a session if the CLI isn't on PATH.</summary>
     public static string FallbackCommands =>
