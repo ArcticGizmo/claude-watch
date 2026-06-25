@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.42] - 2026-06-25
+
+- Sessions that have published web artifacts now show a clickable glyph beside the status dot — click it to open the artifact, or pick from a list when there's more than one.
+
+---
+
 ## [v0.0.41] - 2026-06-25
 
 - Microsoft Teams joins the quick-link presets, next to GitKraken and Slack (finds both the new and classic installs).

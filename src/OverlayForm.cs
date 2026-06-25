@@ -23,6 +23,7 @@ internal sealed class OverlayForm : Form
     private const int Corner            = 10;
     private const int RcIconWidth       = 14;  // width reserved for the remote-control glyph in a row
     private const int MailIconWidth     = 16;  // width reserved for the external-notify (mail) glyph
+    private const int ArtifactIconWidth = 16;  // width reserved for the clickable artifact glyph in a row
     private const int ThermoIconWidth   = 12;  // width reserved for the context-pressure thermometer
     private const int QuickLinksRowHeight = 24; // height of the quick-links icon strip below the usage bars
 
@@ -61,6 +62,7 @@ internal sealed class OverlayForm : Form
     private static readonly Color SubAgentColor  = Color.FromArgb(168, 85,  247);
     private static readonly Color RemoteColor    = Color.FromArgb(96,  165, 250);
     private static readonly Color MailColor      = Color.FromArgb(94,  234, 212);
+    private static readonly Color ArtifactColor  = Color.FromArgb(251, 191, 36);   // amber — the clickable artifact glyph
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
     private static readonly Color UsageRedColor  = Color.FromArgb(239, 68,  68);
     private static readonly Color UsageTrackColor= Color.FromArgb(38,  38,  52);
@@ -81,6 +83,9 @@ internal sealed class OverlayForm : Form
     private Point _formStartLoc;
     private bool  _wasDrag;
     private int   _hoveredRow = -1;
+    // The row index whose artifact glyph the cursor is currently over, or -1. Drives the hand cursor
+    // and a brighter glyph; the glyph is clickable independently of the row's focus-terminal click.
+    private int   _hoveredArtifactRow = -1;
     private bool  _attentionFlash;
 
     // Dense mode: an alternate, out-of-the-way presentation with its own coordinates.
@@ -888,6 +893,37 @@ internal sealed class OverlayForm : Form
         g.SmoothingMode = oldSmoothing;
     }
 
+    // The artifact indicator: Claude's "artifacts" mark — two offset rounded squares — drawn amber when
+    // a session has published one or more web artifacts. Rotated 90° from Claude's default so the two
+    // squares stagger along the "\" diagonal (one upper-left, one lower-right). Both are drawn as full
+    // outlines, so where they overlap the lines cross and stay visible rather than one occluding the
+    // other. Unlike the mail/remote glyphs this one is clickable (see HitTestArtifactIcon); it brightens
+    // while hovered. Pure GDI so it themes and scales like the other glyphs. x is the left edge, midY
+    // the row centre.
+    private static void DrawArtifactIcon(Graphics g, int x, int midY, bool hovered)
+    {
+        var oldSmoothing = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        var color = hovered ? Color.FromArgb(255, 224, 140) : ArtifactColor;
+        using var pen = new Pen(color, 1.4f) { LineJoin = LineJoin.Round };
+
+        const int side   = 8;   // edge length of each square
+        const int offset = 3;   // diagonal stagger between the two squares
+        const int radius = 2;   // corner radius
+
+        int top = midY - (side + offset) / 2;
+        var upperLeft  = new Rectangle(x,          top,          side, side);
+        var lowerRight = new Rectangle(x + offset, top + offset, side, side);
+
+        using (var p1 = RoundedRect(upperLeft, radius))
+            g.DrawPath(pen, p1);
+        using (var p2 = RoundedRect(lowerRight, radius))
+            g.DrawPath(pen, p2);
+
+        g.SmoothingMode = oldSmoothing;
+    }
+
     private static Bitmap? LoadEmbeddedBitmap(string resourceName)
     {
         try
@@ -1342,6 +1378,8 @@ internal sealed class OverlayForm : Form
             _                            => mutedBrush,
         };
 
+        bool hasArtifacts= session.HasArtifacts;
+        int artWidth     = hasArtifacts ? ArtifactIconWidth : 0;
         bool mail        = ExternalNotifyEnabled(session);
         int mailWidth    = mail ? MailIconWidth : 0;
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
@@ -1349,19 +1387,22 @@ internal sealed class OverlayForm : Form
         float ctxFill    = session.ContextFill ?? 0f;
         int thermoWidth  = _showContextPressure && ctxFill >= _ctxYellow ? ThermoIconWidth + 2 : 0;  // icon + 2 px gap right
         var statusSz     = g.MeasureString(statusText, statusFont);
-        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth - thermoWidth;
+        int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth - artWidth - thermoWidth;
         var nameTrunc    = TruncateString(g, session.DisplayName, nameFont, nameMaxWidth);
         var nameSz       = g.MeasureString(nameTrunc, nameFont);
 
-        // Glyphs sit just right of the status dot and push the name across: the mail glyph first
+        // Glyphs sit just right of the status dot and push the name across: the artifact glyph first
+        // (closest to the dot, and clickable to open/pick a published artifact), then the mail glyph
         // (external notifications opted in), then the remote-control broadcast glyph.
+        if (hasArtifacts)
+            DrawArtifactIcon(g, HorizPad + 14, nameMidY, rowIdx == _hoveredArtifactRow);
         if (mail)
-            DrawMailIcon(g, HorizPad + 14, nameMidY);
+            DrawMailIcon(g, HorizPad + 14 + artWidth, nameMidY);
         if (session.RemoteControlled)
-            DrawRemoteIcon(g, HorizPad + 16 + mailWidth, nameMidY);
+            DrawRemoteIcon(g, HorizPad + 16 + artWidth + mailWidth, nameMidY);
 
         g.DrawString(nameTrunc, nameFont, fgBrush,
-            HorizPad + 14 + mailWidth + rcWidth, nameMidY - nameSz.Height / 2);
+            HorizPad + 14 + artWidth + mailWidth + rcWidth, nameMidY - nameSz.Height / 2);
 
         int statusX = ClientSize.Width - HorizPad - (int)statusSz.Width;
         g.DrawString(statusText, statusFont, statusBrush,
@@ -1571,6 +1612,17 @@ internal sealed class OverlayForm : Form
                 Cursor = hovered >= 0 ? Cursors.Hand : Cursors.Default;
                 Invalidate();
             }
+
+            // Artifact glyph hover (clickable; hand cursor + a brighter glyph). Lives inside the
+            // session rows, a different region from the quick-links row above, so the two cursor
+            // updates never fight over the same point.
+            int artHover = ShowFullPanel ? HitTestArtifactIcon(e.Location) : -1;
+            if (artHover != _hoveredArtifactRow)
+            {
+                _hoveredArtifactRow = artHover;
+                Cursor = artHover >= 0 ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
         }
 
         base.OnMouseMove(e);
@@ -1604,6 +1656,12 @@ internal sealed class OverlayForm : Form
             {
                 // The dense toggle: enter dense from floating, or leave it from the open popup.
                 ToggleDense();
+            }
+            else if (HitTestArtifactIcon(e.Location) is var artRow && artRow >= 0)
+            {
+                // The artifact glyph sits inside a session row, so it must be checked before the
+                // row's focus-terminal click — clicking it opens (or lets you pick) the artifact.
+                OpenArtifactsForRow(artRow);
             }
             else
             {
@@ -1653,6 +1711,7 @@ internal sealed class OverlayForm : Form
         _usageHoverTimer.Stop();
         HideUsageTooltip();
         if (_hoveredQuickLink >= 0) { _hoveredQuickLink = -1; Cursor = Cursors.Default; }
+        if (_hoveredArtifactRow >= 0) { _hoveredArtifactRow = -1; Cursor = Cursors.Default; }
 
         // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
         // where the cursor legitimately roams to another monitor's drop lane.
@@ -1688,6 +1747,73 @@ internal sealed class OverlayForm : Form
             y += h;
         }
         return -1;
+    }
+
+    // The vertical centre of a session row's name line — shifted up when the row shows a second
+    // (activity/elapsed) line. Mirrors the layout in DrawSessionRow so the artifact glyph's hit
+    // rectangle lines up with where it's painted.
+    private static int NameMidY(ClaudeSession s, int top)
+    {
+        bool running = s.Status == SessionStatus.Running;
+        bool twoLine = running && (!string.IsNullOrEmpty(s.Activity) || !string.IsNullOrEmpty(s.RunningElapsedLabel()));
+        return twoLine ? top + RowHeight / 2 - 8 : top + RowHeight / 2;
+    }
+
+    // The clickable rectangle of a row's artifact glyph, or Rectangle.Empty when the row has none
+    // (or is a sub-agent row). Kept generous so the small glyph is easy to click.
+    private Rectangle ArtifactIconRect(int rowIdx)
+    {
+        var row = _rows[rowIdx];
+        if (row.IsSubAgent || !row.Session.HasArtifacts)
+            return Rectangle.Empty;
+
+        int top  = RowTop(rowIdx);
+        int midY = NameMidY(row.Session, top);
+        return new Rectangle(HorizPad + 12, midY - 9, ArtifactIconWidth, 18);
+    }
+
+    // Returns the index of the row whose artifact glyph contains p, or -1. Used both for the hand
+    // cursor / hover highlight and to route a click to "open artifact(s)" instead of focusing the row.
+    private int HitTestArtifactIcon(Point p)
+    {
+        if (!ShowFullPanel) return -1;
+        for (int i = 0; i < _rows.Count; i++)
+            if (ArtifactIconRect(i) is { IsEmpty: false } r && r.Contains(p))
+                return i;
+        return -1;
+    }
+
+    // Opens a row's artifact directly when it has just one, or pops a picker to choose when it has
+    // several. No-op if the row somehow has none.
+    private void OpenArtifactsForRow(int rowIdx)
+    {
+        var artifacts = _rows[rowIdx].Session.Artifacts;
+        if (artifacts.Count == 0)
+            return;
+
+        if (artifacts.Count == 1)
+        {
+            OpenArtifact(artifacts[0]);
+            return;
+        }
+
+        // Several artifacts: present them in the same lightweight popover the context menu uses,
+        // each item opening that artifact. Anchored just under the glyph that was clicked.
+        var items = artifacts
+            .Select(a => (a.Title, (Action)(() => OpenArtifact(a))))
+            .ToList();
+
+        _popover?.Close();
+        _popover = new PopoverMenu(items);
+        _popover.FormClosed += (_, _) => _popover = null;
+        var rect = ArtifactIconRect(rowIdx);
+        _popover.ShowAt(PointToScreen(new Point(rect.Left, rect.Bottom + 2)));
+    }
+
+    private static void OpenArtifact(Artifact artifact)
+    {
+        if (!string.IsNullOrWhiteSpace(artifact.Url))
+            StartFile(artifact.Url);
     }
 
     // ── Context menu ─────────────────────────────────────────────────────────

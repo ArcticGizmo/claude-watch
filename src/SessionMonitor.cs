@@ -339,6 +339,10 @@ internal sealed class SessionMonitor : IDisposable
 
             var (contextFill, contextWindow) = _transcripts.GetContextFill(sessionId, cwd);
 
+            // Web Artifacts published to claude.ai over the session's lifetime. Read from the transcript
+            // and cached by mtime, so an unchanged transcript costs a stat, not a parse.
+            var artifacts = _transcripts.GetArtifacts(sessionId, cwd);
+
             var session = new ClaudeSession(
                 pid,
                 sessionId,
@@ -354,7 +358,8 @@ internal sealed class SessionMonitor : IDisposable
                 externalNotify,
                 title,
                 contextFill,
-                contextWindow
+                contextWindow,
+                artifacts
             );
 
             if (status == SessionStatus.NeedsAttention && (prevRaw == "busy" || subsJustFinished))

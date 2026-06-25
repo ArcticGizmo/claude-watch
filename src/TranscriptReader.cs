@@ -30,10 +30,12 @@ internal sealed class TranscriptReader
     private readonly Dictionary<string, CacheEntry> _titleCache = new();
     private readonly Dictionary<string, ContextCacheEntry> _contextFillCache = new();
     private readonly Dictionary<string, BareCommandCacheEntry> _bareCommandCache = new();
+    private readonly Dictionary<string, ArtifactCacheEntry> _artifactCache = new();
 
     private readonly record struct CacheEntry(long Length, DateTime WriteUtc, string? Result);
     private readonly record struct BareCommandCacheEntry(long Length, DateTime WriteUtc, bool Result);
     private readonly record struct ContextCacheEntry(long Length, DateTime WriteUtc, float? Fill, int Window);
+    private readonly record struct ArtifactCacheEntry(long Length, DateTime WriteUtc, IReadOnlyList<Artifact> Result);
 
     /// <summary>
     /// Returns a friendly phrase describing the latest tool call in the session's transcript,
@@ -179,6 +181,84 @@ internal sealed class TranscriptReader
         {
             return (null, ModelContext.DefaultWindow);
         }
+    }
+
+    /// <summary>
+    /// Returns the web Artifacts this session has published to claude.ai, de-duplicated by URL and in
+    /// the order they were first published. Empty when the transcript can't be located/read or holds
+    /// no artifacts. Best-effort; never throws.
+    /// </summary>
+    public IReadOnlyList<Artifact> GetArtifacts(string sessionId, string cwd)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+            return [];
+
+        var path = ResolveTranscript(sessionId, cwd);
+        if (path == null)
+            return [];
+
+        try
+        {
+            var fi = new FileInfo(path);
+            if (_artifactCache.TryGetValue(path, out var cached)
+                && cached.Length == fi.Length && cached.WriteUtc == fi.LastWriteTimeUtc)
+                return cached.Result;
+
+            var result = ParseArtifacts(path);
+            _artifactCache[path] = new ArtifactCacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
+            return result;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static IReadOnlyList<Artifact> ParseArtifacts(string path)
+    {
+        // An Artifact can be published anywhere in the session, so we read the whole file — but it's
+        // cheap: a substring pre-filter skips almost every line, and the result is cached by
+        // length+mtime so this only re-runs when the transcript actually changed. Each publish leaves
+        // one record whose toolUseResult.url is the hosted page; re-publishing reuses the URL, so we
+        // de-dupe by URL (last title wins) while preserving first-seen order.
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs);
+
+        var order = new List<string>();
+        var titles = new Dictionary<string, string>();
+
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            // Cheap pre-filter: only the publish result records carry the artifact URL stem.
+            if (!line.Contains("code/artifact"))
+                continue;
+
+            try
+            {
+                var result = JsonNode.Parse(line)?["toolUseResult"];
+                var url = result?["url"]?.GetValue<string>();
+                if (string.IsNullOrEmpty(url) || !url.Contains("/code/artifact/"))
+                    continue;
+
+                var title = result?["title"]?.GetValue<string>();
+                if (string.IsNullOrWhiteSpace(title))
+                    title = "Untitled artifact";
+
+                if (!titles.ContainsKey(url))
+                    order.Add(url);
+                titles[url] = title.Trim();
+            }
+            catch
+            {
+                // Malformed/partial line (transcripts are appended live) — skip it.
+            }
+        }
+
+        if (order.Count == 0)
+            return [];
+
+        return order.Select(u => new Artifact(u, titles[u])).ToList();
     }
 
     private static (float? fill, int window) ParseContextFill(string path, string cwd)

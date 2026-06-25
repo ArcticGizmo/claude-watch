@@ -36,6 +36,16 @@ public record SubAgent(
     string AgentType     // subagent_type, e.g. "general-purpose", "Explore"
 );
 
+/// <summary>
+/// A web Artifact this session has published (via the Artifact tool) to claude.ai. Surfaced from the
+/// transcript: each publish leaves a tool result whose <c>toolUseResult.url</c> is the hosted page.
+/// Re-publishing reuses the same URL, so artifacts are de-duplicated by <see cref="Url"/>.
+/// </summary>
+public record Artifact(
+    string Url,    // https://claude.ai/code/artifact/{id} — the page to open
+    string Title   // the artifact's title, shown in the picker when a session has several
+);
+
 public record ClaudeSession(
     string Pid,
     string SessionId,
@@ -51,11 +61,19 @@ public record ClaudeSession(
     bool ExternalNotify = false,
     string? Title = null,
     float? ContextFill = null,
-    int ContextWindow = ModelContext.DefaultWindow
+    int ContextWindow = ModelContext.DefaultWindow,
+    IReadOnlyList<Artifact>? Artifacts = null
 )
 {
     /// <summary>Running sub-agents under this session; never null.</summary>
     public IReadOnlyList<SubAgent> SubAgents { get; init; } = SubAgents ?? [];
+
+    /// <summary>Web Artifacts this session has published to claude.ai; never null. See
+    /// <see cref="TranscriptReader.GetArtifacts"/>.</summary>
+    public IReadOnlyList<Artifact> Artifacts { get; init; } = Artifacts ?? [];
+
+    /// <summary>True when this session has at least one published Artifact to open.</summary>
+    public bool HasArtifacts => Artifacts.Count > 0;
 
     /// <summary>
     /// The explicit session name set by Claude Code's built-in <c>/rename</c> command (a
