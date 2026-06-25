@@ -115,6 +115,9 @@ internal sealed class SettingsForm : Form
     /// full current list so the owning context can persist it and refresh the overlay.</summary>
     public event Action<IReadOnlyList<QuickLink>>? QuickLinksChanged;
 
+    /// <summary>Raised when the upside-down quick-links toggle changes. Carries the new on/off state.</summary>
+    public event Action<bool>? UpsideDownQuickLinksChanged;
+
     /// <summary>Raised when the user clicks "Open session stats", to open the stats window.</summary>
     public event Action? OpenStatsRequested;
 
@@ -1100,6 +1103,15 @@ internal sealed class SettingsForm : Form
         // aren't already in the list.
         _quickLinkPresets = ButtonRow();
         page.Controls.Add(_quickLinkPresets);
+
+        page.Controls.Add(Separator());
+
+        var upsideDownToggle = MakeToggle();
+        upsideDownToggle.Checked = _settings.UpsideDownQuickLinks;
+        upsideDownToggle.CheckedChanged += (_, _) =>
+            UpsideDownQuickLinksChanged?.Invoke(upsideDownToggle.Checked);
+        page.Controls.Add(TitleRow("Upside-down icons", upsideDownToggle));
+        page.Controls.Add(BodyText("For when the world feels right way up and you'd rather it didn't."));
 
         RebuildQuickLinksList();
     }

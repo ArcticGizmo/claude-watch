@@ -90,6 +90,10 @@ internal sealed class AppSettings
     // (non-null) list means the user deliberately removed every link and is left alone.
     public List<QuickLink>? QuickLinks { get; set; }
 
+    // Renders the quick-link icons rotated 180°. Purely for fun — the icons happen to look upside down
+    // already, so this leans in. Off by default.
+    public bool UpsideDownQuickLinks { get; set; }
+
     // Legacy quick-link switches (pre-configurable links). Kept only so an older settings file can be
     // migrated into QuickLinks on load; nullable to tell "absent" from "false", and cleared once
     // folded in so they're not re-written. See MigrateQuickLinks.

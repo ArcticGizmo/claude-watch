@@ -171,6 +171,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         // icon load and the Add/Edit dialog don't stall on it.
         System.Threading.Tasks.Task.Run(ShellIcon.WarmCache);
         _overlay.SetQuickLinks(_settings.QuickLinks ?? []);
+        _overlay.SetUpsideDownQuickLinks(_settings.UpsideDownQuickLinks);
         _monitor.Scan();
 
         if (_settings.ShowUsage)
@@ -230,6 +231,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
         _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
         _settingsForm.QuickLinksChanged       += SetQuickLinks;
+        _settingsForm.UpsideDownQuickLinksChanged += SetUpsideDownQuickLinks;
         _settingsForm.OpenStatsRequested      += OpenStats;
         _settingsForm.FormClosed             += (_, _) => _settingsForm = null;
         _settingsForm.Show();
@@ -573,6 +575,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settings.QuickLinks = links.Select(l => l.Clone()).ToList();
         _settings.Save();
         _overlay.SetQuickLinks(links);
+    }
+
+    private void SetUpsideDownQuickLinks(bool upsideDown)
+    {
+        if (_settings.UpsideDownQuickLinks == upsideDown) return;
+        _settings.UpsideDownQuickLinks = upsideDown;
+        _settings.Save();
+        _overlay.SetUpsideDownQuickLinks(upsideDown);
     }
 
     // Pushes an external notification for a session, but only when the feature is on and that session

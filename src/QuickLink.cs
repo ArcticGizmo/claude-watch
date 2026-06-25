@@ -53,19 +53,45 @@ internal sealed class QuickLink
 internal static class KnownApps
 {
     // The well-known link names offered as one-click presets in Settings, in display order.
-    public static readonly string[] PresetNames = ["GitKraken", "Slack"];
+    public static readonly string[] PresetNames = ["GitKraken", "Slack", "Microsoft Teams"];
 
     // Resolves a well-known app's executable by its (case-insensitive) link name. Null for custom
     // names or when the app isn't installed.
     public static string? FindByName(string name) => name.Trim().ToLowerInvariant() switch
     {
-        "gitkraken" => FindGitKraken(),
-        "slack"     => FindSlack(),
-        _           => null,
+        "gitkraken"       => FindGitKraken(),
+        "slack"           => FindSlack(),
+        "microsoft teams" => FindTeams(),
+        _                 => null,
     };
 
     public static string? FindGitKraken() => FindElectronApp("GitKraken", "gitkraken", "gitkraken.exe");
     public static string? FindSlack()     => FindElectronApp("Slack",     "slack",     "slack.exe");
+
+    // Teams doesn't follow the Electron/Squirrel layout. Prefer "new" Teams (an MSIX package launched
+    // via its per-user execution alias), then fall back to the classic per-user install, which keeps a
+    // stable "current" junction pointing at the active version.
+    public static string? FindTeams()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var windowsApps = Path.Combine(local, "Microsoft", "WindowsApps");
+        var alias = Path.Combine(windowsApps, "ms-teams.exe");
+        if (File.Exists(alias)) return alias;
+        if (Directory.Exists(windowsApps))
+        {
+            foreach (var pkg in Directory.GetDirectories(windowsApps, "*MSTeams*"))
+            {
+                var exe = Path.Combine(pkg, "ms-teams.exe");
+                if (File.Exists(exe)) return exe;
+            }
+        }
+
+        var classic = Path.Combine(local, "Microsoft", "Teams", "current", "Teams.exe");
+        if (File.Exists(classic)) return classic;
+
+        return null;
+    }
 
     // programsDir: the folder name under LocalAppData\Programs for a flat install.
     // squirrelDir: the lowercase folder name under LocalAppData for a versioned (app-*) install.

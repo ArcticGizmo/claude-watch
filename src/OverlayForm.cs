@@ -122,6 +122,8 @@ internal sealed class OverlayForm : Form
     private List<Bitmap?> _quickLinkIcons = [];
     // -1 = none hovered, otherwise an index into _quickLinks.
     private int  _hoveredQuickLink = -1;
+    // When on, the quick-link icons are painted rotated 180°. Pure whimsy; off by default.
+    private bool _upsideDownQuickLinks;
 
     private bool HasQuickLinksRow => _quickLinks.Count > 0;
 
@@ -306,6 +308,14 @@ internal sealed class OverlayForm : Form
     {
         if (_showContextPressure == show) return;
         _showContextPressure = show;
+        Invalidate();
+    }
+
+    // Toggles the upside-down quick-link icons. Repaint only — layout is unaffected.
+    public void SetUpsideDownQuickLinks(bool upsideDown)
+    {
+        if (_upsideDownQuickLinks == upsideDown) return;
+        _upsideDownQuickLinks = upsideDown;
         Invalidate();
     }
 
@@ -1031,6 +1041,19 @@ internal sealed class OverlayForm : Form
                     IconSize + HitPad * 2, IconSize + HitPad * 2);
             }
 
+            // The source icons happen to render upside-down, so we flip each slot 180° about its own
+            // centre to set them right way up. When the user opts into upside-down mode, we skip the
+            // correction and let them sit as they naturally fall.
+            GraphicsState? flip = null;
+            if (!_upsideDownQuickLinks)
+            {
+                flip = g.Save();
+                float cx = iconX + IconSize / 2f, cy = iconY + IconSize / 2f;
+                g.TranslateTransform(cx, cy);
+                g.RotateTransform(180f);
+                g.TranslateTransform(-cx, -cy);
+            }
+
             var icon = i < _quickLinkIcons.Count ? _quickLinkIcons[i] : null;
             if (icon != null)
             {
@@ -1045,6 +1068,8 @@ internal sealed class OverlayForm : Form
                 g.DrawString(initials, font, brush,
                     iconX + (IconSize - sz.Width) / 2, iconY + (IconSize - sz.Height) / 2);
             }
+
+            if (flip != null) g.Restore(flip);
         }
     }
 
