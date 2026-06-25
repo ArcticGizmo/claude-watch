@@ -23,6 +23,13 @@ internal sealed class AppSettings
     // (the fill is still computed; it just isn't drawn). Defaults to true; a missing key keeps it on.
     public bool ShowContextPressure { get; set; } = true;
 
+    // Context-pressure thresholds, as whole percentages of the context window. The thermometer is
+    // hidden below Yellow, then warms Yellow -> Orange -> Red as the fill climbs. Kept ordered
+    // (Yellow < Orange < Red) by the settings slider. Defaults match the original hard-coded bands.
+    public int ContextPressureYellowPercent { get; set; } = 50;
+    public int ContextPressureOrangePercent { get; set; } = 65;
+    public int ContextPressureRedPercent    { get; set; } = 80;
+
     // Master switch for Windows desktop (toast/balloon) notifications and chimes. When off, no
     // session balloon is ever shown and no chime is played; the overlay's own attention flash is
     // unaffected. The per-type switches below only take effect while this is on.

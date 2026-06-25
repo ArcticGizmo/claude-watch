@@ -95,6 +95,10 @@ internal sealed class SettingsForm : Form
     /// <summary>Raised when the user toggles "Show context pressure" (true = enabled).</summary>
     public event Action<bool>? ContextPressureChanged;
 
+    /// <summary>Raised when the user adjusts the context-pressure thresholds (whole percentages,
+    /// ordered yellow &lt; orange &lt; red).</summary>
+    public event Action<int, int, int>? ContextThresholdsChanged;
+
     /// <summary>Raised when the user clicks "Check for Updates".</summary>
     public event EventHandler? CheckForUpdatesRequested;
 
@@ -556,18 +560,40 @@ internal sealed class SettingsForm : Form
     // ── Context ───────────────────────────────────────────────────────────────────────
     private void BuildContextPage(FlowLayoutPanel page)
     {
+        var slider = new ContextThresholdSlider { Margin = new Padding(0, 4, 0, 8) };
+
         var toggle = MakeToggle();
         toggle.Checked = _settings.ShowContextPressure;
-        toggle.CheckedChanged += (_, _) => ContextPressureChanged?.Invoke(toggle.Checked);
+        toggle.CheckedChanged += (_, _) =>
+        {
+            ContextPressureChanged?.Invoke(toggle.Checked);
+            slider.Enabled = toggle.Checked;
+        };
         page.Controls.Add(TitleRow("Context pressure", toggle));
 
         page.Controls.Add(BodyText(
             "Warns when a session is filling up its context window. A small thermometer appears next " +
-            "to the session in the overlay once it crosses the halfway mark, filling up and warming " +
-            "from amber to red as the window approaches full."));
+            "to the session in the overlay once it crosses the first threshold, filling up and warming " +
+            "from yellow to orange to red as the window approaches full."));
         page.Controls.Add(BodyText(
             "The window size is read from the model the session is running — the 1M-token beta is " +
             "recognised as such — so the gauge reflects the real headroom, not a fixed limit."));
+
+        page.Controls.Add(Separator());
+
+        page.Controls.Add(SectionTitle("Thresholds"));
+        page.Controls.Add(BodyText(
+            "Drag the handles to choose where the thermometer first appears and where it turns orange " +
+            "and red. Everything left of the first handle stays hidden."));
+
+        slider.SetValues(
+            _settings.ContextPressureYellowPercent,
+            _settings.ContextPressureOrangePercent,
+            _settings.ContextPressureRedPercent);
+        slider.Enabled = _settings.ShowContextPressure;
+        slider.RangeChanged += (y, o, r) => ContextThresholdsChanged?.Invoke(y, o, r);
+        _fluidWidth.Add((slider, 0));
+        page.Controls.Add(slider);
     }
 
     // ── Session Stats ────────────────────────────────────────────────────────────────

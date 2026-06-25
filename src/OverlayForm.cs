@@ -109,6 +109,9 @@ internal sealed class OverlayForm : Form
     private bool _usageEnabled = true;
     private bool _showExpectedRate = true;
     private bool _showContextPressure = true;
+    // Context-pressure thresholds as fractions of the window: hidden below yellow, then yellow ->
+    // orange -> red. Defaults match the original hard-coded bands; overridden from settings.
+    private float _ctxYellow = 0.50f, _ctxOrange = 0.65f, _ctxRed = 0.80f;
     private bool _inUsageStrip;
     private readonly UsageTooltipForm _usageTooltip = new();
 
@@ -303,6 +306,16 @@ internal sealed class OverlayForm : Form
     {
         if (_showContextPressure == show) return;
         _showContextPressure = show;
+        Invalidate();
+    }
+
+    /// <summary>Sets the context-pressure colour thresholds (whole percentages of the window). The
+    /// thermometer is hidden below <paramref name="yellow"/>, then warms yellow → orange → red.</summary>
+    public void SetContextThresholds(int yellow, int orange, int red)
+    {
+        _ctxYellow = yellow / 100f;
+        _ctxOrange = orange / 100f;
+        _ctxRed    = red    / 100f;
         Invalidate();
     }
 
@@ -1289,7 +1302,7 @@ internal sealed class OverlayForm : Form
         int badgeWidth   = session.Mode != PermissionMode.Normal ? 16 : 0;
         int rcWidth      = session.RemoteControlled ? RcIconWidth : 0;
         float ctxFill    = session.ContextFill ?? 0f;
-        int thermoWidth  = _showContextPressure && ctxFill >= 0.50f ? ThermoIconWidth + 2 : 0;  // icon + 2 px gap right
+        int thermoWidth  = _showContextPressure && ctxFill >= _ctxYellow ? ThermoIconWidth + 2 : 0;  // icon + 2 px gap right
         var statusSz     = g.MeasureString(statusText, statusFont);
         int nameMaxWidth = ClientSize.Width - HorizPad * 3 - 8 - (int)statusSz.Width - badgeWidth - rcWidth - mailWidth - thermoWidth;
         var nameTrunc    = TruncateString(g, session.DisplayName, nameFont, nameMaxWidth);
@@ -1363,18 +1376,19 @@ internal sealed class OverlayForm : Form
     }
 
     // Context-pressure thermometer: tube (4 px wide, 9 px tall) + bulb (8 px diameter), with mercury
-    // rising from the bottom. Only drawn when fill ≥ 50 %; colour shifts yellow → orange → red.
-    // x is the left edge of the reserved ThermoIconWidth area; midY is the vertical row centre.
-    private static void DrawThermoIcon(Graphics g, float fill, int x, int midY)
+    // rising from the bottom. Only drawn at/above the yellow threshold; colour shifts yellow → orange
+    // → red at the configured thresholds. x is the left edge of the reserved ThermoIconWidth area;
+    // midY is the vertical row centre.
+    private void DrawThermoIcon(Graphics g, float fill, int x, int midY)
     {
-        if (fill < 0.50f) return;
+        if (fill < _ctxYellow) return;
 
         var old = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        Color col = fill >= 0.80f ? Color.FromArgb(239, 68,  68)   // red
-                  : fill >= 0.65f ? Color.FromArgb(249, 115, 22)   // orange
-                                  : Color.FromArgb(234, 179,  8);  // yellow
+        Color col = fill >= _ctxRed    ? Color.FromArgb(239, 68,  68)   // red
+                  : fill >= _ctxOrange ? Color.FromArgb(249, 115, 22)   // orange
+                                       : Color.FromArgb(234, 179,  8);  // yellow
 
         // Tube: 4 px wide, top at midY-7, bottom at midY+2 (9 px).
         // Bulb: 8 px diameter circle whose top edge overlaps the tube bottom by 2 px.
