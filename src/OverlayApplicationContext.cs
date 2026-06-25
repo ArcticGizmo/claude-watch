@@ -1,3 +1,4 @@
+using ClaudeWatch.App;
 using ClaudeWatch.Ui;
 using Velopack;
 using Velopack.Sources;
@@ -56,13 +57,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
     // for the next poll. Empty until the first successful (or attempted) fetch.
     private UsageInfo _lastUsage = UsageInfo.Empty;
 
-    // PID of the session whose notification was last shown, so a balloon click
-    // can focus the right terminal.
-    private string? _lastNotifiedPid;
-
-    // Project name of that session, used to disambiguate when its host (e.g. VSCode) owns
-    // several windows. Tracked alongside _lastNotifiedPid.
-    private string? _lastNotifiedProject;
+    // Dispatches tray balloons, chimes and external (ntfy) pushes, and tracks the last-notified
+    // session so a balloon click can focus its terminal. Created once the tray icon exists (see ctor).
+    private readonly NotificationService _notifications;
 
     // Latched while a check/download/apply is in flight so a second click (the menu and the settings
     // window both reach CheckForUpdates) can't kick off a parallel run and race two installs.
@@ -90,6 +87,8 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         // Left-click opens the first-class settings window; right-click shows the slim menu below.
         _notifyIcon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenSettings(); };
         _notifyIcon.BalloonTipClicked += OnBalloonTipClicked;
+
+        _notifications = new NotificationService(_notifyIcon, _settings, _lockMonitor);
 
         var trayMenu = new ContextMenuStrip();
 
@@ -197,14 +196,14 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         if (marketplace && plugin)
             return;
 
-        ShowInfoBalloon("Claude Watch",
+        _notifications.ShowInfo("Claude Watch",
             "Setting up the Claude Code plugin…", ToolTipIcon.Info);
 
         try
         {
             var (ok, _) = await new PluginManager().EnableAsync();
             if (ok)
-                ShowInfoBalloon("Claude Watch",
+                _notifications.ShowInfo("Claude Watch",
                     "Claude Code plugin installed. Run /reload-plugins (or restart) in open sessions to load it.", ToolTipIcon.Info);
         }
         catch { /* best-effort: skip on any failure */ }
@@ -228,9 +227,9 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _settingsForm.ContextPressureChanged += SetContextPressureEnabled;
         _settingsForm.ContextThresholdsChanged += SetContextThresholds;
         _settingsForm.CheckForUpdatesRequested += (_, _) => CheckForUpdates();
-        _settingsForm.TestNotificationRequested += ShowTestNotification;
+        _settingsForm.TestNotificationRequested += _notifications.ShowTest;
         _settingsForm.ExternalNotificationsEnabledChanged += SetExternalNotificationsEnabled;
-        _settingsForm.TestExternalNotificationRequested   += SendExternalTestNotification;
+        _settingsForm.TestExternalNotificationRequested   += () => _ = _notifications.SendExternalTestAsync();
         _settingsForm.QuickLinksChanged       += SetQuickLinks;
         _settingsForm.UpsideDownQuickLinksChanged += SetUpsideDownQuickLinks;
         _settingsForm.OpenStatsRequested      += OpenStats;
@@ -460,77 +459,16 @@ internal sealed class OverlayApplicationContext : ApplicationContext
 
     private void OnNeedsAttention(ClaudeSession session)
     {
-        // The overlay's own attention flash is always on; only the Windows balloon is gated.
+        // The overlay's own attention flash is always on; the balloon/chime/external push are gated
+        // (per their settings) inside the notification service.
         _overlay.TriggerAttention();
-
-        if (_settings.NotificationsEnabled && _settings.NotifyOnDone)
-            ShowSessionBalloon(NotificationKind.Done, session.DisplayName, session.Pid);
-
-        if (_settings.NotificationsEnabled && _settings.ChimeOnDone)
-            PlayChime(NotificationKind.Done);
-
-        MaybeSendExternal(NotificationKind.Done, session);
+        _notifications.Notify(NotificationKind.Done, session);
     }
 
     private void OnAwaitingInput(ClaudeSession session)
     {
         _overlay.TriggerAttention();
-
-        if (_settings.NotificationsEnabled && _settings.NotifyOnWaitingInput)
-            ShowSessionBalloon(NotificationKind.WaitingForInput, session.DisplayName, session.Pid);
-
-        if (_settings.NotificationsEnabled && _settings.ChimeOnWaitingInput)
-            PlayChime(NotificationKind.WaitingForInput);
-
-        MaybeSendExternal(NotificationKind.WaitingForInput, session);
-    }
-
-    // Shows the desktop balloon for a session notification. A null pid means there's no real
-    // session behind it (a settings "Test"), so a click won't try to focus a terminal.
-    private void ShowSessionBalloon(NotificationKind kind, string projectName, string? pid)
-    {
-        _lastNotifiedPid = pid;
-        _lastNotifiedProject = projectName;
-        switch (kind)
-        {
-            case NotificationKind.Done:
-                _notifyIcon.BalloonTipTitle = "Claude Code — Done";
-                _notifyIcon.BalloonTipText  = $"Waiting for you in {projectName}";
-                _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
-                break;
-            case NotificationKind.WaitingForInput:
-                _notifyIcon.BalloonTipTitle = "Claude Code — Waiting for Input";
-                _notifyIcon.BalloonTipText  = $"{projectName} needs your response";
-                _notifyIcon.BalloonTipIcon  = ToolTipIcon.Warning;
-                break;
-        }
-        _notifyIcon.ShowBalloonTip(8000);
-    }
-
-    // Fired by the settings window's per-type "Test" buttons: shows a sample balloon and plays the
-    // chime so the user can preview exactly what that notification looks and sounds like, regardless
-    // of the saved toggles.
-    private void ShowTestNotification(NotificationKind kind)
-    {
-        ShowSessionBalloon(kind, "example-project", null);
-        PlayChime(kind);
-    }
-
-    // Plays the built-in Windows system chime matching a notification type. Asterisk is the soft
-    // "information" tone (Done); Exclamation is the sharper "attention" tone (WaitingForInput). Both
-    // are fire-and-forget and honour the user's per-event sound scheme in Windows. External (ntfy)
-    // pushes deliberately never reach here — sound is a local-desktop affordance only.
-    private static void PlayChime(NotificationKind kind)
-    {
-        switch (kind)
-        {
-            case NotificationKind.Done:
-                System.Media.SystemSounds.Asterisk.Play();
-                break;
-            case NotificationKind.WaitingForInput:
-                System.Media.SystemSounds.Exclamation.Play();
-                break;
-        }
+        _notifications.Notify(NotificationKind.WaitingForInput, session);
     }
 
     // ── External (ntfy) notifications ─────────────────────────────────────────────
@@ -573,76 +511,15 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         _overlay.SetUpsideDownQuickLinks(upsideDown);
     }
 
-    // Pushes an external notification for a session, but only when the feature is on and that session
-    // has opted in. Independent of the Windows-balloon per-type toggles above.
-    private void MaybeSendExternal(NotificationKind kind, ClaudeSession session)
-    {
-        // A session pushes if it opted in (its marker file, set via right-click or /afk) OR the
-        // account-wide AFK override is on and the screen is currently locked. The master switch gates both.
-        bool optedIn   = session.ExternalNotify;
-        bool afkActive = _settings.NotifyWhenLocked && _lockMonitor.IsLocked;
-        if (!_settings.ExternalNotificationsEnabled || (!optedIn && !afkActive))
-            return;
-
-        var (title, body, tags) = kind == NotificationKind.Done
-            ? ("Claude Code — Done", $"Waiting for you in {session.DisplayName}", "white_check_mark")
-            : ("Claude Code — Waiting for Input", $"{session.DisplayName} needs your response", "bell");
-
-        var host = _settings.NtfyHost;
-        var topic = _settings.NtfyTopic;
-        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(topic))
-            return;
-
-        // Attach an "Open session" action only when the session is remote-controlled (so the deep
-        // link actually resolves) and the user has opted into including it.
-        string? actionUrl = _settings.ExternalNotificationsIncludeRemoteLink && session.RemoteControlled
-            ? $"https://claude.ai/code/{session.BridgeSessionId}"
-            : null;
-
-        // Fire-and-forget: a failed push must never stall or crash the monitor callback.
-        _ = NtfyNotifier.SendAsync(host, topic, title, body, tags, actionUrl, "Open session");
-    }
-
-    // The settings window's "Send test notification": pushes a sample to the configured ntfy
-    // host/topic and reports the outcome via a tray balloon, so misconfiguration is visible.
-    private async void SendExternalTestNotification()
-    {
-        var host = _settings.NtfyHost;
-        var topic = _settings.NtfyTopic;
-        if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(topic))
-        {
-            ShowInfoBalloon("Claude Watch — ntfy", "Enter a server URL and topic first.", ToolTipIcon.Warning);
-            return;
-        }
-
-        var (ok, error) = await NtfyNotifier.SendAsync(
-            host, topic, "Claude Watch — Test", "External notifications are working.", "bell");
-
-        ShowInfoBalloon("Claude Watch — ntfy",
-            ok ? "Test notification sent." : $"Failed to send: {error}",
-            ok ? ToolTipIcon.Info : ToolTipIcon.Error);
-    }
-
-    // A tray balloon not tied to any session (so a click won't focus a stale terminal).
-    private void ShowInfoBalloon(string title, string text, ToolTipIcon icon)
-    {
-        _lastNotifiedPid = null;
-        _lastNotifiedProject = null;
-        _notifyIcon.BalloonTipTitle = title;
-        _notifyIcon.BalloonTipText  = text;
-        _notifyIcon.BalloonTipIcon  = icon;
-        _notifyIcon.ShowBalloonTip(5000);
-    }
-
     // Clicking the desktop notification focuses the terminal for the session that
     // raised it and acknowledges the alert, mirroring an overlay/indicator click.
     private void OnBalloonTipClicked(object? sender, EventArgs e)
     {
-        var pid = _lastNotifiedPid;
+        var pid = _notifications.LastNotifiedPid;
         if (pid == null) return;
 
         if (int.TryParse(pid, out int pidInt))
-            NativeMethods.FocusTerminalForProcess(pidInt, _lastNotifiedProject);
+            NativeMethods.FocusTerminalForProcess(pidInt, _notifications.LastNotifiedProject);
 
         AcknowledgeSession(pid);
     }
@@ -663,33 +540,24 @@ internal sealed class OverlayApplicationContext : ApplicationContext
             return;
         _updateInProgress = true;
 
-        // Update balloons aren't tied to a session; don't let a click focus a stale terminal.
-        _lastNotifiedPid = null;
-        _lastNotifiedProject = null;
+        // Update balloons aren't tied to a session (ShowInfo clears the last-notified pid so a click
+        // can't focus a stale terminal).
         try
         {
             // Querying GitHub can take a few seconds; show an immediate balloon so the click feels
             // acknowledged rather than dead until the check resolves.
-            _notifyIcon.BalloonTipTitle = "Claude Watch";
-            _notifyIcon.BalloonTipText  = "Checking for updates…";
-            _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
-            _notifyIcon.ShowBalloonTip(3000);
+            _notifications.ShowInfo("Claude Watch", "Checking for updates…", ToolTipIcon.Info, 3000);
 
             var mgr = new UpdateManager(new GithubSource("https://github.com/ArcticGizmo/claude-watch", null, false));
             var update = await mgr.CheckForUpdatesAsync();
             if (update == null)
             {
-                _notifyIcon.BalloonTipTitle = "Claude Watch";
-                _notifyIcon.BalloonTipText  = "You're on the latest version.";
-                _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
-                _notifyIcon.ShowBalloonTip(4000);
+                _notifications.ShowInfo("Claude Watch", "You're on the latest version.", ToolTipIcon.Info, 4000);
                 return;
             }
 
-            _notifyIcon.BalloonTipTitle = "Claude Watch — Updating";
-            _notifyIcon.BalloonTipText  = $"Downloading v{update.TargetFullRelease.Version}…";
-            _notifyIcon.BalloonTipIcon  = ToolTipIcon.Info;
-            _notifyIcon.ShowBalloonTip(5000);
+            _notifications.ShowInfo("Claude Watch — Updating",
+                $"Downloading v{update.TargetFullRelease.Version}…", ToolTipIcon.Info, 5000);
 
             // Close the open windows up front: the closing window is the visible signal that the
             // update is under way, and it stops the button being clicked again mid-download. The
@@ -707,10 +575,7 @@ internal sealed class OverlayApplicationContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            _notifyIcon.BalloonTipTitle = "Claude Watch — Update Failed";
-            _notifyIcon.BalloonTipText  = ex.Message;
-            _notifyIcon.BalloonTipIcon  = ToolTipIcon.Error;
-            _notifyIcon.ShowBalloonTip(6000);
+            _notifications.ShowInfo("Claude Watch — Update Failed", ex.Message, ToolTipIcon.Error, 6000);
         }
         finally
         {
