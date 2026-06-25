@@ -210,13 +210,32 @@ internal sealed class SessionMonitor : IDisposable
                 _idleSince[pid] = now;
             _lastRawStatus[pid] = rawStatus;
 
+            // Fast/interactive built-ins (/clear, /model, /doctor, …) briefly flip the session
+            // busy->idle (or busy->waiting) without the model doing any work, which would otherwise
+            // raise a spurious "done"/"waiting" alert. Detect them lazily — only at the transition
+            // where we'd actually notify — by asking whether the transcript's latest turn is one of
+            // these bare commands. The read is cached by mtime, so this costs at most one stat/parse
+            // per scan per session, and only when a transition is in play.
+            bool? bareCommand = null;
+            bool IsBareCommand() =>
+                (bareCommand ??= _transcripts.LastTurnWasBareCommand(sessionId, cwd)) == true;
+
             SessionStatus status;
             // Claude Code reports a dedicated "waiting" status (with a "waitingFor" hint such as
             // "permission prompt") while it is blocked on user input. Some flows may also surface
             // a non-empty waitingFor without flipping the status, so treat either as awaiting input.
             bool awaitingInput =
                 rawStatus == "waiting" || !string.IsNullOrWhiteSpace(waitingFor);
-            if (awaitingInput)
+            if (awaitingInput && IsBareCommand())
+            {
+                // An interactive built-in (e.g. the /model picker) is open. The user typed the
+                // command and is already at the keyboard, so treat it as idle rather than nagging
+                // them with a "waiting for input" alert.
+                _idleSince.Remove(pid);
+                _awaitingInputPids.Remove(pid);
+                status = SessionStatus.Idle;
+            }
+            else if (awaitingInput)
             {
                 _idleSince.Remove(pid);
                 status = SessionStatus.AwaitingInput;
@@ -230,7 +249,15 @@ internal sealed class SessionMonitor : IDisposable
             else
             {
                 _awaitingInputPids.Remove(pid);
-                if (
+                if (prevRaw == "busy" && IsBareCommand())
+                {
+                    // A fast built-in (e.g. /clear, /doctor) just finished; no model work happened,
+                    // so it shouldn't count as a completion. Drop the idle timestamp set above and
+                    // stay plain idle — no NeedsAttention glyph, no "done" alert.
+                    _idleSince.Remove(pid);
+                    status = SessionStatus.Idle;
+                }
+                else if (
                     _idleSince.TryGetValue(pid, out var idleAt)
                     && (now - idleAt).TotalMinutes < NeedsAttentionMinutes
                 )

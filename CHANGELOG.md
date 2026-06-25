@@ -9,6 +9,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.37] - 2026-06-25
+
+- Fast built-in commands like `/clear`, `/model`, and `/doctor` no longer set off a "done" (or "waiting for input") alert — if Claude didn't actually do any work, you won't get pinged for it
+- Plugin installs at user scope, so it follows you across every project
+
+---
+
 ## [v0.0.36] - 2026-06-25
 
 - Context-pressure gauge — see a warning when your context window is about to boil over

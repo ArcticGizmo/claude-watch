@@ -29,8 +29,10 @@ internal sealed class TranscriptReader
     private readonly Dictionary<string, CacheEntry> _cache = new();
     private readonly Dictionary<string, CacheEntry> _titleCache = new();
     private readonly Dictionary<string, ContextCacheEntry> _contextFillCache = new();
+    private readonly Dictionary<string, BareCommandCacheEntry> _bareCommandCache = new();
 
     private readonly record struct CacheEntry(long Length, DateTime WriteUtc, string? Result);
+    private readonly record struct BareCommandCacheEntry(long Length, DateTime WriteUtc, bool Result);
     private readonly record struct ContextCacheEntry(long Length, DateTime WriteUtc, float? Fill, int Window);
 
     /// <summary>
@@ -63,6 +65,50 @@ internal sealed class TranscriptReader
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// True when the most recent meaningful turn in the session's transcript is a built-in slash
+    /// command (e.g. <c>/clear</c>, <c>/model</c>, <c>/doctor</c>) that completed without the model
+    /// doing any work — i.e. no assistant message has been appended since the command was invoked.
+    ///
+    /// This is the discriminator for the fast/interactive built-ins the user never wants flagged as
+    /// "running/done": those commands flip the session busy->idle (or busy->waiting for the ones with
+    /// a picker) for a fraction of a second but produce no assistant turn, whereas a real prompt — or
+    /// a command that actually drives the model, like <c>/init</c> or a custom command — always leaves
+    /// assistant records behind. Metadata trailers (<c>last-prompt</c>, <c>mode</c>, <c>ai-title</c>, …)
+    /// are ignored; only <c>assistant</c> records and command invocations are weighed.
+    ///
+    /// Cached by (length, last-write) like the other readers, so a scan that doesn't change the
+    /// transcript costs a stat, not a parse. Best-effort; never throws (returns false on any failure).
+    /// </summary>
+    public bool LastTurnWasBareCommand(string sessionId, string cwd)
+    {
+        if (string.IsNullOrEmpty(sessionId))
+            return false;
+
+        var path = ResolveTranscript(sessionId, cwd);
+        if (path == null)
+            return false;
+
+        try
+        {
+            var fi = new FileInfo(path);
+            if (
+                _bareCommandCache.TryGetValue(path, out var cached)
+                && cached.Length == fi.Length
+                && cached.WriteUtc == fi.LastWriteTimeUtc
+            )
+                return cached.Result;
+
+            var result = ParseBareCommand(path);
+            _bareCommandCache[path] = new BareCommandCacheEntry(fi.Length, fi.LastWriteTimeUtc, result);
+            return result;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -374,6 +420,76 @@ internal sealed class TranscriptReader
         }
 
         return latest;
+    }
+
+    private static bool ParseBareCommand(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+        long start = Math.Max(0, fs.Length - TailBytes);
+        fs.Seek(start, SeekOrigin.Begin);
+        using var reader = new StreamReader(fs);
+
+        // Seeking into the middle almost certainly lands mid-record; drop the partial first line.
+        // (If the tail spans a full window there is necessarily an assistant turn within it, so a
+        // bare command older than the window can't be the latest meaningful turn anyway.)
+        if (start > 0)
+            reader.ReadLine();
+
+        // Walk chronologically and remember only which of the two meaningful kinds came last: an
+        // assistant turn (the model did work) or a command invocation (the user ran a slash command).
+        // Everything else — plain user prompts, command stdout, mode/title/snapshot metadata — is
+        // skipped so the trailing metadata records every transcript ends with don't muddy the verdict.
+        bool lastWasCommand = false;
+
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            bool maybeAssistant = line.Contains("\"type\":\"assistant\"");
+            bool maybeCommand = line.Contains("command-name");
+            if (!maybeAssistant && !maybeCommand)
+                continue;
+
+            try
+            {
+                var node = JsonNode.Parse(line);
+                if (node?["type"]?.GetValue<string>() == "assistant")
+                {
+                    lastWasCommand = false;
+                    continue;
+                }
+
+                // A command invocation is recorded either as a system/local_command record (content
+                // is the command string) or as a user record whose message content is that string.
+                // Either way the content starts with "<command-name>"; requiring the prefix at the
+                // very start keeps a user message that merely quotes the tag from being mistaken for
+                // a real invocation.
+                if (ContentString(node)?.StartsWith("<command-name>") == true)
+                    lastWasCommand = true;
+            }
+            catch
+            {
+                // Malformed/partial line (transcripts are appended live) — skip it.
+            }
+        }
+
+        return lastWasCommand;
+    }
+
+    // Pulls a record's textual content out of either shape we see for command invocations:
+    // a top-level "content" string (system/local_command) or "message.content" string (user).
+    // Returns null when content is absent or an array (e.g. an assistant block list).
+    private static string? ContentString(JsonNode? node)
+    {
+        if (node?["content"] is JsonValue direct)
+        {
+            try { return direct.GetValue<string>(); } catch { }
+        }
+        if (node?["message"]?["content"] is JsonValue msg)
+        {
+            try { return msg.GetValue<string>(); } catch { }
+        }
+        return null;
     }
 
     private static string? ParseTitle(string path)

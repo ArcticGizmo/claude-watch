@@ -382,7 +382,7 @@ internal sealed class SettingsForm : Form
     // ── Plugin Control ────────────────────────────────────────────────────────────
     // The install commands for the claude-watch Claude Code plugin (marketplace ref name@marketplace).
     private const string PluginInstallCommands =
-        "/plugin marketplace add ArcticGizmo/claude-watch\n/plugin install claude-watch@claude-watch";
+        "/plugin marketplace add ArcticGizmo/claude-watch\n/plugin install claude-watch@claude-watch --scope user";
 
     // Status of the claude-watch plugin and the single action button (Enable / Update / Up to date).
     private Label   _pluginStatusLabel = null!;
