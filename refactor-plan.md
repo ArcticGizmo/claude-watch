@@ -138,13 +138,25 @@ inconsistencies surfaced by consolidating the duplicated logic may be fixed in t
 such fix is isolated in its own commit and called out in the message, so it reviews separately from
 the pure mechanical move.
 
-### Phase 0 — Test project & golden baselines
-Add `ClaudeWatch.Tests` (xUnit) and register it in `claude-watch.slnx`. Seed it with fixtures captured
-from real `~/.claude` transcripts (a few representative `.jsonl` files + session/settings sidecars),
-and pin the *current* outputs of the pure logic — `SessionStatsService`, `ModelContext`, `ToolSummary`,
-`TranscriptReader`, `SubAgentReader`, `TranscriptParser` — as a golden baseline. This is the safety net
-Phase 2 leans on. (The test project references the existing `ClaudeWatch.csproj`; the WinForms types it
-can't drive are exercised manually per `CLAUDE.md`.)
+### Phase 0 — Test project & golden baselines — ✅ DONE
+1. Added `tests/ClaudeWatch.Tests/` (xUnit, `net10.0-windows`), registered in `claude-watch.slnx`,
+   referencing `src/ClaudeWatch.csproj`. Packages (`Microsoft.NET.Test.Sdk`, `xunit`,
+   `xunit.runner.visualstudio`) are all in the local NuGet cache, so it restores offline.
+2. **60 golden/characterization tests** pinning the current behaviour of every pure-logic target of
+   Phase 2: `ModelContext`, `ToolSummary`, `TranscriptLocator`, `TranscriptParser`, `TranscriptReader`,
+   `SubAgentReader`, `SessionStatsService` (per-file `ParseSession`, `ActiveSpan`, `CostOf`, and the
+   public `ReportAllTime` pipeline).
+3. Fixtures are **synthetic**, PII-free `.jsonl` transcripts authored to the real Claude Code schema
+   (tool_use/result stitching, usage, `/model` switch, custom-title, artifact publish, legacy + 2.1
+   sub-agent layouts, bare-command, scan-fallback). Captured-from-real transcripts were avoided
+   deliberately (PII policy); synthetic fixtures are also deterministic and tz-independent.
+4. Test seams: `InternalsVisibleTo("ClaudeWatch.Tests")` on the main project; a handful of `internal`
+   widenings in `SessionStatsService`; and a module initializer that points the data layer at the
+   fixture tree via `CLAUDE_CONFIG_DIR`.
+5. Drive-by (policy §6.2): `ClaudePaths.ClaudeDir` now honours the **`CLAUDE_CONFIG_DIR`** environment
+   variable (which Claude Code itself respects) — a real improvement for users with a relocated config,
+   behaviour-identical when unset, and the seam that makes the data layer testable.
+6. Verified: full solution builds clean (0 warnings); `dotnet test` → 60 passed, 0 failed.
 
 ### Phase 1 — Path & transcript-location foundation *(low risk, pure)* — ✅ DONE
 1. Added `ClaudeWatch.Data.ClaudePaths` (`src/Data/ClaudePaths.cs`) with the canonical roots; routed

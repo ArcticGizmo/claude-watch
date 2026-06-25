@@ -211,8 +211,8 @@ internal static class SessionStatsService
     }
 
     // Sums the gaps between consecutive records, capping any gap over the idle threshold, then adds a
-    // small tail. times must be sorted ascending and non-empty.
-    private static TimeSpan ActiveSpan(List<DateTime> times)
+    // small tail. times must be sorted ascending and non-empty. (internal for golden tests.)
+    internal static TimeSpan ActiveSpan(List<DateTime> times)
     {
         var total = TimeSpan.Zero;
         for (int i = 1; i < times.Count; i++)
@@ -277,7 +277,8 @@ internal static class SessionStatsService
 
     // Parses one transcript and buckets its in-range records by local day. The cwd and git branch are
     // session constants, captured once and stamped onto every day-bucket for the session.
-    private static Dictionary<DateOnly, SessionDayData> ParseSession(string file, DateTime? from, DateTime to)
+    // (internal for golden tests — this is a primary target of the Phase 2 parsing consolidation.)
+    internal static Dictionary<DateOnly, SessionDayData> ParseSession(string file, DateTime? from, DateTime to)
     {
         var perDay = new Dictionary<DateOnly, SessionDayData>();
         string project = "", branch = "";
@@ -535,7 +536,8 @@ internal static class SessionStatsService
             hourly[times[^1].Hour] += (int)SessionTail.TotalSeconds;
     }
 
-    private static decimal? CostOf(string model, TokenTotals t)
+    // internal for golden tests — pins the per-model pricing the cost estimate depends on.
+    internal static decimal? CostOf(string model, TokenTotals t)
     {
         foreach (var (key, input, output) in Prices)
         {
@@ -560,7 +562,8 @@ internal static class SessionStatsService
     }
 
     // Mutable per-(session, day) scratch used only while parsing one transcript.
-    private sealed class SessionDayData
+    // (internal so golden tests can assert the parsed fields.)
+    internal sealed class SessionDayData
     {
         public string Project = "";
         public string Branch = "";

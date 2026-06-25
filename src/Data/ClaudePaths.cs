@@ -1,9 +1,9 @@
 namespace ClaudeWatch.Data;
 
 /// <summary>
-/// The single owner of every <c>~/.claude</c> filesystem location Claude Watch reads. Centralised so
+/// The single owner of every Claude Code config-directory location Claude Watch reads. Centralised so
 /// the rule "where does Claude Code keep X" lives in one place rather than being recomputed in each
-/// reader (it previously appeared in seven). All paths derive from the current user profile and are
+/// reader (it previously appeared in seven). All paths derive from <see cref="ClaudeDir"/> and are
 /// computed once; nothing here touches the disk.
 /// </summary>
 internal static class ClaudePaths
@@ -12,8 +12,18 @@ internal static class ClaudePaths
     public static string Home { get; } =
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    /// <summary><c>~/.claude</c> — the root of Claude Code's per-user state.</summary>
-    public static string ClaudeDir { get; } = Path.Combine(Home, ".claude");
+    /// <summary>
+    /// The Claude Code config directory. Honours the <c>CLAUDE_CONFIG_DIR</c> environment variable that
+    /// Claude Code itself respects (so a relocated config is followed correctly); falls back to the
+    /// default <c>~/.claude</c> when it is unset or blank.
+    /// </summary>
+    public static string ClaudeDir { get; } = ResolveClaudeDir();
+
+    private static string ResolveClaudeDir()
+    {
+        var configDir = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+        return string.IsNullOrWhiteSpace(configDir) ? Path.Combine(Home, ".claude") : configDir;
+    }
 
     /// <summary><c>~/.claude/sessions</c> — live session sidecars (<c>{pid}.json</c> and the
     /// <c>.mode</c> / <c>.notify</c> / <c>.history</c> markers that ride alongside them).</summary>
