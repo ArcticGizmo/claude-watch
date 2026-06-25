@@ -264,12 +264,28 @@ geometry/ARGB); a runtime pass is still owed (see Phase Future).
      in-form `Position()` duplication were both removed; the rest stays put. Revisit only if a second
      window ever needs the fluid factories.
 
-### Phase 6 — Namespace / folder migration
-Move the existing files into `Data/` `Ui/` `App/` folders under `src/` and convert them to the
-matching `ClaudeWatch.Data` / `ClaudeWatch.Ui` / `ClaudeWatch.App` namespaces, fixing up
-using-directives. (New files added in Phases 0–5 are already in their final namespace, so this phase
-only moves the pre-existing 31.) Done last so the logic refactors never touch a file twice. Verify the
-build and a full app run after the move.
+### Phase 6 — Namespace / folder migration — ✅ DONE
+Moved the pre-existing 31 files into `src/Data` `src/Ui` `src/App` and converted them from the flat
+`ClaudeWatch` namespace to `ClaudeWatch.Data` / `.Ui` / `.App` (git tracked all 31 as renames, so
+history is preserved). New files from Phases 0–5 were already in their final namespace.
+
+Final layering (no cycles): **Data** (20 files — models, `~/.claude` readers, the monitors,
+`AppSettings`, `PluginManager`, `QuickLink`/`KnownApps`, the transcript primitives) depends on nothing;
+**Ui** (20 files — every form, the drawing foundation, plus `NativeMethods`/`ShellIcon` interop) depends
+on Data; **App** (6 files — `OverlayApplicationContext`, `Program`, `NotificationService`, `NtfyNotifier`,
+`WindowHost`, `PathRegistration`) depends on both. Categorisation was placement-by-lowest-consumer:
+e.g. `AppSettings`/`QuickLink`/`LockMonitor` are in Data because a Data file (`SessionStatsService` /
+`AppSettings`) consumes them; `NativeMethods`/`ShellIcon` are in Ui (window/icon interop, App reaches
+them via App→Ui).
+
+Fixups: added `using ClaudeWatch.Data;` to the Ui/App files that use models/readers, `using
+ClaudeWatch.Ui;` to `OverlayApplicationContext`, and `using ClaudeWatch.Data;` to the test files;
+removed the now-dead bare `using ClaudeWatch;` directives (the root namespace is empty); gave
+`Program.cs` (a top-level class) `namespace ClaudeWatch.App;`.
+
+Verified: full solution builds clean (0 warnings) + 60/60 tests. *Owes a quick app-launch smoke* — pure
+namespace/folder moves don't change runtime behaviour (no logic touched), so this is a formality, but
+per the original plan a full run after the move is the final sign-off.
 
 ### Phase Future — backlog & follow-ups (so we don't forget)
 From the Phase 1–4 runtime verification (launched the built tray app on a 3-monitor setup; overlay,
