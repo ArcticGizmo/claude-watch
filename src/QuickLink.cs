@@ -53,7 +53,7 @@ internal sealed class QuickLink
 internal static class KnownApps
 {
     // The well-known link names offered as one-click presets in Settings, in display order.
-    public static readonly string[] PresetNames = ["GitKraken", "Slack", "Microsoft Teams"];
+    public static readonly string[] PresetNames = ["GitKraken", "Slack", "Microsoft Teams", "Outlook"];
 
     // Resolves a well-known app's executable by its (case-insensitive) link name. Null for custom
     // names or when the app isn't installed.
@@ -62,6 +62,7 @@ internal static class KnownApps
         "gitkraken"       => FindGitKraken(),
         "slack"           => FindSlack(),
         "microsoft teams" => FindTeams(),
+        "outlook"         => FindOutlook(),
         _                 => null,
     };
 
@@ -89,6 +90,51 @@ internal static class KnownApps
 
         var classic = Path.Combine(local, "Microsoft", "Teams", "current", "Teams.exe");
         if (File.Exists(classic)) return classic;
+
+        return null;
+    }
+
+    // Outlook, like Teams, comes in two flavours. Prefer "new" Outlook (an MSIX package launched via
+    // its per-user execution alias "olk.exe"), then fall back to classic Outlook, a Click-to-Run / MSI
+    // install of the Office suite that lives under Program Files in a versioned "OfficeNN" folder.
+    public static string? FindOutlook()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var windowsApps = Path.Combine(local, "Microsoft", "WindowsApps");
+        var alias = Path.Combine(windowsApps, "olk.exe");
+        if (File.Exists(alias)) return alias;
+        if (Directory.Exists(windowsApps))
+        {
+            foreach (var pkg in Directory.GetDirectories(windowsApps, "*OutlookForWindows*"))
+            {
+                var exe = Path.Combine(pkg, "olk.exe");
+                if (File.Exists(exe)) return exe;
+            }
+        }
+
+        // Classic Outlook ships inside the Office suite. Click-to-Run keeps a stable "root" junction;
+        // MSI installs land directly in a versioned OfficeNN folder. Probe both 64- and 32-bit Program
+        // Files, newest Office version first.
+        foreach (var programFiles in new[]
+                 {
+                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                     Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                 })
+        {
+            if (string.IsNullOrEmpty(programFiles)) continue;
+            var office = Path.Combine(programFiles, "Microsoft Office");
+            foreach (var baseDir in new[] { Path.Combine(office, "root"), office })
+            {
+                if (!Directory.Exists(baseDir)) continue;
+                foreach (var ver in Directory.GetDirectories(baseDir, "Office*")
+                                             .OrderByDescending(x => x, StringComparer.OrdinalIgnoreCase))
+                {
+                    var exe = Path.Combine(ver, "OUTLOOK.EXE");
+                    if (File.Exists(exe)) return exe;
+                }
+            }
+        }
 
         return null;
     }

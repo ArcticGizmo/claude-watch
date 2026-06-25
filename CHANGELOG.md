@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.43] - 2026-06-25
+
+- Outlook joins the quick-link presets, alongside Microsoft Teams (finds both new Outlook and classic Office-suite installs).
+
+---
+
 ## [v0.0.42] - 2026-06-25
 
 - Sessions that have published web artifacts now show a clickable glyph beside the status dot — click it to open the artifact, or pick from a list when there's more than one.
