@@ -1517,22 +1517,14 @@ internal sealed class SettingsForm : Form
         Margin        = new Padding(0, 0, 0, 4),
     };
 
+    // The settings window's buttons: a shared flat dark button that auto-sizes to its text with a
+    // little padding and a right margin between buttons in a row.
     private static Button MakeButton(string text)
     {
-        var b = new Button
-        {
-            Text      = text,
-            AutoSize  = true,
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Theme.Fg,
-            BackColor = Theme.ButtonBg,
-            Padding   = new Padding(8, 4, 8, 4),
-            Margin    = new Padding(0, 0, 8, 0),
-            UseVisualStyleBackColor = false,
-        };
-        b.FlatAppearance.BorderColor        = Theme.Border;
-        b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
-        b.FlatAppearance.MouseDownBackColor = Theme.Border;
+        var b = ThemedControls.FlatButton(text);
+        b.AutoSize = true;
+        b.Padding  = new Padding(8, 4, 8, 4);
+        b.Margin   = new Padding(0, 0, 8, 0);
         return b;
     }
 

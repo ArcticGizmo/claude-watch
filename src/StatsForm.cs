@@ -144,18 +144,12 @@ internal sealed class StatsForm : Form
     // ── Scope toolbar ──────────────────────────────────────────────────────────────
     private void AddScopeButton(string text, Scope scope)
     {
-        var b = new Button
-        {
-            Text = text,
-            Height = 28,
-            FlatStyle = FlatStyle.Flat,
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point),
-            TabStop = false,
-            UseVisualStyleBackColor = false,
-            AutoSize = false,
-            Width = 78,
-        };
-        b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
+        var b = ThemedControls.FlatButton(text);
+        b.Height   = 28;
+        b.Font     = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+        b.TabStop  = false;
+        b.AutoSize = false;
+        b.Width    = 78;
         b.Click += (_, _) => { if (_scope != scope) { _scope = scope; RefreshStats(); } };
         _scopeButtons[scope] = b;
         _toolbar.Controls.Add(b);
@@ -176,12 +170,7 @@ internal sealed class StatsForm : Form
     private void UpdateScopeButtons()
     {
         foreach (var (scope, b) in _scopeButtons)
-        {
-            bool on = scope == _scope;
-            b.BackColor = on ? Theme.Accent : Theme.ButtonBg;
-            b.ForeColor = on ? Color.FromArgb(18, 18, 24) : Theme.Fg;
-            b.FlatAppearance.BorderColor = on ? Theme.Accent : Theme.Border;
-        }
+            ThemedControls.StyleToggle(b, scope == _scope);
     }
 
     // ── Layout ───────────────────────────────────────────────────────────────────

@@ -1,3 +1,5 @@
+using ClaudeWatch.Ui;
+
 namespace ClaudeWatch;
 
 /// <summary>
@@ -60,13 +62,13 @@ internal sealed class QuickLinkDialog : Form
         _pathBox = MakeTextBox(existing?.ExePath ?? "");
         _pathBox.SetBounds(pad, pathCaption.Bottom + 4, innerW - browseW - gap, _pathBox.Height);
 
-        var browse = MakeButton("Browse…");
+        var browse = ThemedControls.FlatButton("Browse…");
         browse.SetBounds(_pathBox.Right + gap, _pathBox.Top - 1, browseW, _pathBox.Height + 2);
         browse.Click += (_, _) => Browse();
 
-        var ok = MakeButton("Save");
+        var ok = ThemedControls.FlatButton("Save");
         ok.DialogResult = DialogResult.OK;
-        var cancel = MakeButton("Cancel");
+        var cancel = ThemedControls.FlatButton("Cancel");
         cancel.DialogResult = DialogResult.Cancel;
 
         const int btnW = 92, btnH = 30;
@@ -167,22 +169,6 @@ internal sealed class QuickLinkDialog : Form
         BorderStyle = BorderStyle.FixedSingle,
         Font        = new Font("Segoe UI", 9.5f, FontStyle.Regular, GraphicsUnit.Point),
     };
-
-    private static Button MakeButton(string text)
-    {
-        var b = new Button
-        {
-            Text      = text,
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Theme.Fg,
-            BackColor = Theme.ButtonBg,
-            UseVisualStyleBackColor = false,
-        };
-        b.FlatAppearance.BorderColor        = Theme.Border;
-        b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
-        b.FlatAppearance.MouseDownBackColor = Theme.Border;
-        return b;
-    }
 
     protected override void Dispose(bool disposing)
     {

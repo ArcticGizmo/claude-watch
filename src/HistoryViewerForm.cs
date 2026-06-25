@@ -1018,21 +1018,14 @@ internal sealed class HistoryViewerForm : Form
 
     private void UpdateViewButtons()
     {
-        StyleToggle(_readableBtn, !_raw);
-        StyleToggle(_rawBtn, _raw);
+        ThemedControls.StyleToggle(_readableBtn, !_raw);
+        ThemedControls.StyleToggle(_rawBtn, _raw);
     }
 
     private void UpdateFollowButton()
     {
         _followBtn.Text = _follow ? "Following" : "Follow";
-        StyleToggle(_followBtn, _follow);
-    }
-
-    private static void StyleToggle(Button b, bool on)
-    {
-        b.BackColor = on ? Theme.Accent : Theme.ButtonBg;
-        b.ForeColor = on ? Color.FromArgb(18, 18, 24) : Theme.Fg;
-        b.FlatAppearance.BorderColor = on ? Theme.Accent : Theme.Border;
+        ThemedControls.StyleToggle(_followBtn, _follow);
     }
 
     // ── Toolbar / title layout ───────────────────────────────────────────────────
@@ -1232,20 +1225,11 @@ internal sealed class HistoryViewerForm : Form
 
     private static Button FlatButton(string text, int width)
     {
-        var b = new Button
-        {
-            Text      = text,
-            Width     = width,
-            Height    = 26,
-            FlatStyle = FlatStyle.Flat,
-            ForeColor = Theme.Fg,
-            BackColor = Theme.ButtonBg,
-            Font      = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point),
-            TabStop   = false,
-            UseVisualStyleBackColor = false,
-        };
-        b.FlatAppearance.BorderColor = Theme.Border;
-        b.FlatAppearance.MouseOverBackColor = Theme.ButtonHover;
+        var b = ThemedControls.FlatButton(text);
+        b.Width   = width;
+        b.Height  = 26;
+        b.Font    = new Font("Segoe UI", 8.5f, FontStyle.Regular, GraphicsUnit.Point);
+        b.TabStop = false;
         return b;
     }
 
