@@ -187,16 +187,32 @@ the pure mechanical move.
 5. Verified: the 60-test Phase 0 golden baseline still passes unchanged (artifact de-dup, bare-command,
    context-fill, stats counts/tokens/cost all intact); full solution builds clean (0 warnings).
 
-### Phase 3 — UI foundation *(low risk, high consistency payoff)*
-1. **Extend `Theme`** into the single palette: add overlay status colours, body/card backgrounds,
-   popup chrome, and glyph colours. Replace hard-coded `Color.FromArgb` across `OverlayForm`,
-   `StatsForm`, `HistoryViewerForm`, `PopoverMenu`, `UsageTooltipForm`, `QrCodeForm`,
-   `DenseDropZoneForm`. (Directly satisfies the CLAUDE.md palette rule.)
-2. Add `PaintKit` (rounded-rect family + `UsageColor`/`Blend`); replace the ~8 copies.
-3. Add `EmbeddedResources`; replace the 4 `LoadEmbeddedBitmap` + `LoadEmbeddedText`.
-4. Add `Glyphs`; move the mode-badge/remote/mail/artifact/thermometer/side-collapse painters in.
-5. Add `UsageBarRenderer`; have the overlay and `UsageBarsControl` call it.
-6. Add `ToolWindow` base form; re-base `PopoverMenu`, `UsageTooltipForm`, `QrCodeForm` on it.
+### Phase 3 — UI foundation *(low risk, high consistency payoff)* — ✅ CORE DONE
+Verification note: the overlay/windows are owner-drawn and can only be verified by eye (no UI tests),
+so this phase was scoped to **provably value-preserving** changes — identical geometry, identical
+ARGB, identical resource loading — committed in small increments (3a, 3b).
+
+Done:
+1. **`PaintKit`** (`src/Ui/PaintKit.cs`) — rounded-rect path + pill-bar fill; replaced the ~8 copies
+   across `OverlayForm`, `PopoverMenu`, `UsageTooltipForm`, `QrCodeForm`, `StatsForm`, `SettingsControls`. *(3a)*
+2. **`EmbeddedResources`** (`src/Ui/EmbeddedResources.cs`) — `LoadBitmap`/`LoadText`; replaced the
+   4 `LoadEmbeddedBitmap` + 1 `LoadEmbeddedText`. *(3a)*
+3. **Cross-file colour-function dedup** — `OverlayForm`'s `ModeColor`, `Blend`, and `UsageColor` were
+   byte-for-byte duplicates of `Theme.ModeColor`/`Theme.Blend`/`Theme.UsageColor`; removed and pointed
+   at `Theme`. *(3b)*
+4. **`Glyphs`** (`src/Ui/Glyphs.cs`) — the permission-mode badge was drawn (bar the size) in both
+   `OverlayForm` and `SettingsControls.ModeLegend`; unified into one size-parameterised painter. *(3b)*
+
+Deferred (deliberately — these carry visual-only risk on an eyeball-only surface, or are better placed
+elsewhere):
+- **`UsageBarRenderer`** — the overlay and settings usage bars share ~50 lines but differ in widths,
+  fonts, and dim-shades; a shared renderer is value-preserving only if every differing value is
+  threaded through, and the result needs a real visual check. Worth doing with a human eyeball.
+- **`ToolWindow` base form** — the three popups differ in activation/ex-style behaviour; this is a
+  form-structure change, folded into **Phase 5** (form decomposition).
+- **Full palette migration** — folding every window's private shade into `Theme` mostly preserves
+  distinct values under new names (low dedup value) and flattens the overlay's readable semantic
+  names; not pursued. The genuine duplicates (the colour *functions* above) are gone.
 
 ### Phase 4 — App orchestration *(medium risk)*
 1. Add `UiDispatch.RunThenPost`; apply at the 4 off-thread sites.

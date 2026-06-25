@@ -953,7 +953,7 @@ internal sealed class OverlayForm : Form
         int midY = rowTop + BarRowHeight / 2;
 
         // Caption (left)
-        Color capColor = stale ? Blend(MutedColor, BgColor, 0.5f) : MutedColor;
+        Color capColor = stale ? Theme.Blend(MutedColor, BgColor, 0.5f) : MutedColor;
         using (var capBrush = new SolidBrush(capColor))
         {
             var capSz = g.MeasureString(caption, capFont);
@@ -966,7 +966,7 @@ internal sealed class OverlayForm : Form
         int trackW     = Math.Max(0, trackRight - trackLeft);
         int trackY     = midY - TrackH / 2;
 
-        Color trackColor = stale ? Blend(UsageTrackColor, BgColor, 0.4f) : UsageTrackColor;
+        Color trackColor = stale ? Theme.Blend(UsageTrackColor, BgColor, 0.4f) : UsageTrackColor;
         using (var trackBrush = new SolidBrush(trackColor))
             PaintKit.FillRoundedBar(g, trackBrush, trackLeft, trackY, trackW, TrackH);
 
@@ -976,8 +976,8 @@ internal sealed class OverlayForm : Form
         if (percent is { } p)
         {
             double clamped = Math.Clamp(p, 0, 100);
-            Color barColor = UsageColor(clamped);
-            if (stale) barColor = Blend(barColor, BgColor, 0.5f);
+            Color barColor = Theme.UsageColor(clamped);
+            if (stale) barColor = Theme.Blend(barColor, BgColor, 0.5f);
 
             int fillW = (int)Math.Round(trackW * clamped / 100.0);
             if (fillW > 0)
@@ -998,7 +998,7 @@ internal sealed class OverlayForm : Form
         {
             int markerX = trackLeft + (int)Math.Round(trackW * ep / 100.0);
             Color markerColor = Color.FromArgb(180, 180, 195);
-            if (stale) markerColor = Blend(markerColor, BgColor, 0.5f);
+            if (stale) markerColor = Theme.Blend(markerColor, BgColor, 0.5f);
             using var markerBrush = new SolidBrush(markerColor);
             g.FillRectangle(markerBrush, markerX - 1, trackY - 1, 2, TrackH + 2);
         }
@@ -1015,21 +1015,6 @@ internal sealed class OverlayForm : Form
         var elapsed = DateTime.Now - (resetsAt.Value - window);
         return Math.Clamp(elapsed.TotalSeconds / window.TotalSeconds * 100.0, 0, 100);
     }
-
-    // Colour thresholds: <50 green, 50–75 yellow, 75–90 orange, 90+ red.
-    private static Color UsageColor(double pct) => pct switch
-    {
-        < 50 => RunningColor,
-        < 75 => AwaitingColor,
-        < 90 => AttentionColor,
-        _    => UsageRedColor,
-    };
-
-    // Blends two opaque colours (t = weight of b), so dimmed bars stay crisp over the panel bg.
-    private static Color Blend(Color a, Color b, float t) => Color.FromArgb(
-        (int)(a.R * (1 - t) + b.R * t),
-        (int)(a.G * (1 - t) + b.G * t),
-        (int)(a.B * (1 - t) + b.B * t));
 
     // ── Quick links row ───────────────────────────────────────────────────────
     // Draws the enabled quick-link icons side-by-side, centred horizontally. Each slot shows its
@@ -1396,7 +1381,7 @@ internal sealed class OverlayForm : Form
             DrawThermoIcon(g, ctxFill, statusX - thermoWidth, nameMidY);
 
         if (session.Mode != PermissionMode.Normal)
-            DrawModeBadge(g, session.Mode, statusX - thermoWidth - badgeWidth, nameMidY);
+            Glyphs.DrawModeBadge(g, session.Mode, statusX - thermoWidth - badgeWidth, nameMidY, 4, 5);
 
         if (twoLine)
         {
@@ -1425,24 +1410,6 @@ internal sealed class OverlayForm : Form
         }
     }
 
-    private static Color ModeColor(PermissionMode mode) => mode switch
-    {
-        PermissionMode.AcceptEdits => Color.FromArgb(167, 139, 250),
-        PermissionMode.Plan        => Color.FromArgb(96,  165, 250),
-        PermissionMode.Auto        => Color.FromArgb(250, 204, 21),
-        PermissionMode.Bypass      => Color.FromArgb(239, 68,  68),
-        _                          => Color.Transparent,
-    };
-
-    private static void DrawModeBadge(Graphics g, PermissionMode mode, int x, int midY)
-    {
-        using var brush = new SolidBrush(ModeColor(mode));
-
-        // All permission modes render as a fast-forward (double-chevron) badge, distinguished by
-        // colour (Plan is blue). A pause-style badge read too much like an idle session.
-        g.FillPolygon(brush, new[] { new Point(x,     midY - 4), new Point(x + 5,  midY), new Point(x,     midY + 4) });
-        g.FillPolygon(brush, new[] { new Point(x + 6, midY - 4), new Point(x + 11, midY), new Point(x + 6, midY + 4) });
-    }
 
     // Context-pressure thermometer: tube (4 px wide, 9 px tall) + bulb (8 px diameter), with mercury
     // rising from the bottom. Only drawn at/above the yellow threshold; colour shifts yellow → orange

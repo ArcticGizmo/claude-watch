@@ -368,7 +368,7 @@ internal sealed class ModeLegend : Control
             }
             else
             {
-                DrawModeBadge(g, mode, 4, midY);
+                Glyphs.DrawModeBadge(g, mode, 4, midY, 5, 6);
             }
 
             var sz = g.MeasureString(label, font);
@@ -379,13 +379,6 @@ internal sealed class ModeLegend : Control
         }
     }
 
-    // Same double-chevron (fast-forward) glyph the overlay draws, in the mode's colour.
-    private static void DrawModeBadge(Graphics g, PermissionMode mode, int x, int midY)
-    {
-        using var brush = new SolidBrush(Theme.ModeColor(mode));
-        g.FillPolygon(brush, new[] { new Point(x,     midY - 5), new Point(x + 6,  midY), new Point(x,     midY + 5) });
-        g.FillPolygon(brush, new[] { new Point(x + 7, midY - 5), new Point(x + 13, midY), new Point(x + 7, midY + 5) });
-    }
 }
 
 /// <summary>
