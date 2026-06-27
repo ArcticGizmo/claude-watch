@@ -9,6 +9,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [v0.0.45] - 2026-06-27
+
+- Claude Watch has become [Perch](https://github.com/ArcticGizmo/perch) — every settings page and the overlay header now carry a banner pointing you to the new app. Click through and install it; this one is winding down.
+- Uninstalling now clears out the app's data directory too, instead of leaving its belongings behind.
+
+---
+
 ## [v0.0.44] - 2026-06-25
 
 - Honours the `CLAUDE_CONFIG_DIR` environment variable, so a relocated Claude config is found (matching Claude Code itself).

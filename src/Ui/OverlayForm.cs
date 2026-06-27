@@ -16,6 +16,7 @@ internal sealed class OverlayForm : Form, IDenseHost
     // ── Layout ────────────────────────────────────────────────────────────────
     private const int FormWidth       = 280;
     private const int HeaderHeight    = 44;
+    private const int RebrandBannerHeight = 22;  // thin "we've rebranded" strip below the header, always shown
     private const int BarRowHeight    = 18;
     private const int UsageStripHeight= 50;  // two usage bars + padding, shown only when expanded
     private const int RowHeight        = 46;
@@ -57,6 +58,11 @@ internal sealed class OverlayForm : Form, IDenseHost
     private static readonly Color TreeLineColor  = Color.FromArgb(55,  55,  72);
     private static readonly Color UsageRedColor  = Color.FromArgb(239, 68,  68);
     private static readonly Color UsageTrackColor= Color.FromArgb(38,  38,  52);
+    // Rebrand banner: a warm amber call-out matching the settings "moved to Perch" card.
+    private static readonly Color RebrandBg      = Color.FromArgb(40,  33,  20);
+    private static readonly Color RebrandBgHover = Color.FromArgb(56,  46,  28);
+    private static readonly Color RebrandFg      = Color.FromArgb(251, 146, 60);
+    private const string PerchUrl = "https://github.com/ArcticGizmo/perch";
 
     // ── State ─────────────────────────────────────────────────────────────────
     // A flat render list of parent-session rows interleaved with their running sub-agent
@@ -107,8 +113,15 @@ internal sealed class OverlayForm : Form, IDenseHost
 
     private bool HasQuickLinksRow => _quickLinks.Count > 0;
 
-    // Top of the session rows when expanded: header, plus the usage strip and optional quick-links row.
-    private int RowsTop => HeaderHeight + (_usageEnabled ? UsageStripHeight : 0) + (HasQuickLinksRow ? QuickLinksRowHeight : 0);
+    // True while the cursor is over the rebrand banner (drives the hand cursor and the hover tint).
+    private bool _hoveredRebrand;
+
+    // The y where everything below the header begins — the header plus the always-present rebrand
+    // banner. Every body offset (usage strip, quick links, rows) is measured from here.
+    private int BodyTop => HeaderHeight + RebrandBannerHeight;
+
+    // Top of the session rows when expanded: body top, plus the usage strip and optional quick-links row.
+    private int RowsTop => BodyTop + (_usageEnabled ? UsageStripHeight : 0) + (HasQuickLinksRow ? QuickLinksRowHeight : 0);
 
     private readonly System.Windows.Forms.Timer _flashTimer;
     private readonly System.Windows.Forms.Timer _flashStopTimer;
@@ -162,7 +175,7 @@ internal sealed class OverlayForm : Form, IDenseHost
 
         var screen = Screen.PrimaryScreen!.WorkingArea;
         Location   = new Point(screen.Right - FormWidth - 16, screen.Top + FloatTopGap);
-        ClientSize = new Size(FormWidth, HeaderHeight);
+        ClientSize = new Size(FormWidth, BodyTop);  // header + always-present rebrand banner
 
         _flashTimer = new System.Windows.Forms.Timer { Interval = 500 };
         _flashTimer.Tick += (_, _) => { _attentionFlash = !_attentionFlash; Invalidate(); };
@@ -431,16 +444,17 @@ internal sealed class OverlayForm : Form, IDenseHost
         }
         else
         {
-            int h = _expanded ? FullPanelHeight() : HeaderHeight;
+            // Collapsed is the header plus the always-present rebrand banner (BodyTop).
+            int h = _expanded ? FullPanelHeight() : BodyTop;
             if (ClientSize.Height != h || ClientSize.Width != FormWidth)
                 ClientSize = new Size(FormWidth, h);
         }
     }
 
-    // Height of the full panel (header + optional usage strip + all session rows).
+    // Height of the full panel (header + rebrand banner + optional usage strip + all session rows).
     private int FullPanelHeight()
     {
-        int h = HeaderHeight;
+        int h = BodyTop;
         if (_rows.Count > 0)
         {
             if (_usageEnabled)
@@ -478,6 +492,7 @@ internal sealed class OverlayForm : Form, IDenseHost
         }
 
         DrawHeader(g);
+        DrawRebrandBanner(g, path);
 
         if (_autoCloseActive)
             DrawAutoCloseBar(g);
@@ -513,6 +528,39 @@ internal sealed class OverlayForm : Form, IDenseHost
             using (var fill = new SolidBrush(IdleColor))
                 PaintKit.FillRoundedBar(g, fill, left, y, fillW, TrackH);
     }
+
+    // The always-present rebrand banner: a thin amber strip just below the header announcing that
+    // Claude Watch is now Perch, clickable to open the new project. Shown whether the panel is
+    // collapsed or expanded (it sits between the header and the body). The fill is clipped to the
+    // window's rounded outline so the bottom corners stay rounded when the panel is collapsed and the
+    // banner is the last thing drawn.
+    private void DrawRebrandBanner(Graphics g, GraphicsPath bodyPath)
+    {
+        var rect = RebrandBannerRect();
+
+        var oldClip = g.Clip;
+        using (var region = new Region(bodyPath))
+        {
+            g.Clip = region;
+            using var bg = new SolidBrush(_hoveredRebrand ? RebrandBgHover : RebrandBg);
+            g.FillRectangle(bg, rect);
+        }
+        g.Clip = oldClip;
+
+        // A hairline divider from the header above.
+        using (var sep = new Pen(SepColor, 1f))
+            g.DrawLine(sep, HorizPad, rect.Top, ClientSize.Width - HorizPad, rect.Top);
+
+        using var font  = new Font("Segoe UI", 8f, FontStyle.Bold, GraphicsUnit.Point);
+        using var brush = new SolidBrush(RebrandFg);
+        const string text = "We are now Perch! → Click here to Update";
+        var sz = g.MeasureString(text, font);
+        g.DrawString(text, font, brush,
+            (ClientSize.Width - sz.Width) / 2f, rect.Top + (RebrandBannerHeight - sz.Height) / 2f);
+    }
+
+    // The banner's clickable rectangle (full width, just under the header).
+    private Rectangle RebrandBannerRect() => new(0, HeaderHeight, ClientSize.Width, RebrandBannerHeight);
 
     private void DrawHeader(Graphics g)
     {
@@ -713,7 +761,7 @@ internal sealed class OverlayForm : Form, IDenseHost
         using var capFont = new Font("Segoe UI", 7.5f, FontStyle.Regular, GraphicsUnit.Point);
         using var pctFont = new Font("Segoe UI", 7.5f, FontStyle.Bold,    GraphicsUnit.Point);
 
-        int top = HeaderHeight + 2;
+        int top = BodyTop + 2;
         double? sessionExpected = _showExpectedRate ? UsageBarRenderer.ElapsedPercent(_usage.FiveHourResetsAt, TimeSpan.FromHours(5)) : null;
         double? weeklyExpected  = _showExpectedRate ? UsageBarRenderer.ElapsedPercent(_usage.SevenDayResetsAt, TimeSpan.FromDays(7))  : null;
         DrawUsageBar(g, top,                "Session", _usage.FiveHourPercent, sessionExpected, stale, capFont, pctFont);
@@ -738,7 +786,7 @@ internal sealed class OverlayForm : Form, IDenseHost
         const int IconGap  = 14;
         const int HitPad   = 4;
 
-        int rowTop  = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+        int rowTop  = BodyTop + (_usageEnabled ? UsageStripHeight : 0);
         int centerY = rowTop + QuickLinksRowHeight / 2;
 
         int count  = _quickLinks.Count;
@@ -794,7 +842,7 @@ internal sealed class OverlayForm : Form, IDenseHost
     private int HitTestQuickLink(Point p)
     {
         if (!HasQuickLinksRow) return -1;
-        int rowTop = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
+        int rowTop = BodyTop + (_usageEnabled ? UsageStripHeight : 0);
         if (p.Y < rowTop || p.Y >= rowTop + QuickLinksRowHeight) return -1;
 
         const int IconSize = 16;
@@ -1150,8 +1198,8 @@ internal sealed class OverlayForm : Form, IDenseHost
             }
 
             // Dwell over the usage strip (only the two bar rows, not the quick-links row below them).
-            int usageStripEnd = HeaderHeight + (_usageEnabled ? UsageStripHeight : 0);
-            bool inStrip = ShowFullPanel && _usageEnabled && e.Y >= HeaderHeight && e.Y < usageStripEnd;
+            int usageStripEnd = BodyTop + (_usageEnabled ? UsageStripHeight : 0);
+            bool inStrip = ShowFullPanel && _usageEnabled && e.Y >= BodyTop && e.Y < usageStripEnd;
             if (inStrip != _inUsageStrip)
             {
                 _inUsageStrip = inStrip;
@@ -1186,6 +1234,16 @@ internal sealed class OverlayForm : Form, IDenseHost
                 Cursor = artHover >= 0 ? Cursors.Hand : Cursors.Default;
                 Invalidate();
             }
+
+            // Rebrand banner hover — always live (the banner shows collapsed or expanded), but never
+            // over the closed dense strip, which has no header/banner.
+            bool overRebrand = !_denseMode.IsClosedStrip && RebrandBannerRect().Contains(e.Location);
+            if (overRebrand != _hoveredRebrand)
+            {
+                _hoveredRebrand = overRebrand;
+                Cursor = overRebrand ? Cursors.Hand : Cursors.Default;
+                Invalidate();
+            }
         }
 
         base.OnMouseMove(e);
@@ -1215,7 +1273,12 @@ internal sealed class OverlayForm : Form, IDenseHost
         {
             bool headerVisible = !_denseMode.IsClosedStrip;
 
-            if (headerVisible && SideIconRect().Contains(e.Location))
+            if (headerVisible && RebrandBannerRect().Contains(e.Location))
+            {
+                // The rebrand banner: open the new project's home page.
+                OpenUrl(PerchUrl);
+            }
+            else if (headerVisible && SideIconRect().Contains(e.Location))
             {
                 // The dense toggle: enter dense from floating, or leave it from the open popup.
                 _denseMode.Toggle();
@@ -1272,6 +1335,7 @@ internal sealed class OverlayForm : Form, IDenseHost
         HideUsageTooltip();
         if (_hoveredQuickLink >= 0) { _hoveredQuickLink = -1; Cursor = Cursors.Default; }
         if (_hoveredArtifactRow >= 0) { _hoveredArtifactRow = -1; Cursor = Cursors.Default; }
+        if (_hoveredRebrand) { _hoveredRebrand = false; Cursor = Cursors.Default; }
 
         // Start the countdown to collapse the dense popup back to the strip — but not mid-drag,
         // where the cursor legitimately roams to another monitor's drop lane.
@@ -1285,7 +1349,7 @@ internal sealed class OverlayForm : Form, IDenseHost
     // ── Usage tooltip ──────────────────────────────────────────────────────────
     private void ShowUsageTooltip()
     {
-        var stripScreen = RectangleToScreen(new Rectangle(0, HeaderHeight, ClientSize.Width, UsageStripHeight));
+        var stripScreen = RectangleToScreen(new Rectangle(0, BodyTop, ClientSize.Width, UsageStripHeight));
         _usageTooltip.ShowFor(_usage, stripScreen);
     }
 
@@ -1374,6 +1438,12 @@ internal sealed class OverlayForm : Form, IDenseHost
     {
         if (!string.IsNullOrWhiteSpace(artifact.Url))
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(artifact.Url) { UseShellExecute = true });
+    }
+
+    private static void OpenUrl(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { }
     }
 
     // ── Context menu ─────────────────────────────────────────────────────────

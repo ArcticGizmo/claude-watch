@@ -210,6 +210,8 @@ internal sealed class SettingsForm : Form
             BackColor     = Theme.FormBg,
             Visible       = false,
         };
+        // Every page leads with the "moved to Perch" banner, then its own content.
+        page.Controls.Add(MovedBanner());
         build(page);
         _pages[key] = page;
         _contentHost.Controls.Add(page);
@@ -1614,6 +1616,74 @@ internal sealed class SettingsForm : Form
     {
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
         catch { }
+    }
+
+    // The new home for this project. Claude Watch is no longer maintained here — it lives on as Perch.
+    private const string PerchUrl = "https://github.com/ArcticGizmo/perch";
+
+    // A prominent, clickable banner shown at the very top of every settings page: Claude Watch has
+    // been superseded by Perch, and the user should install the new app. The whole card opens the
+    // Perch repository. Width comes from the fluid pass; the body wraps and the card sizes its own
+    // height to fit (matching the manual layout-on-resize pattern used elsewhere in this form).
+    private Panel MovedBanner()
+    {
+        const int padX = 14, padY = 12, gap = 6;
+
+        var banner = new Panel
+        {
+            BackColor = Color.FromArgb(40, 33, 20),  // warm amber tint, distinct from the page body
+            Margin    = new Padding(0, 0, 0, 14),
+            Cursor    = Cursors.Hand,
+        };
+        // A left accent bar to read unmistakably as a call-out, not just another section.
+        var accent = new Panel { Dock = DockStyle.Left, Width = 3, BackColor = Theme.Orange };
+
+        var heading = new Label
+        {
+            Text      = "This project has moved to Perch",
+            AutoSize  = true,
+            ForeColor = Theme.Orange,
+            Font      = new Font("Segoe UI", 10.5f, FontStyle.Bold, GraphicsUnit.Point),
+        };
+        var body = new Label
+        {
+            Text      = "Claude Watch is no longer maintained here. To keep getting updates, install " +
+                        "the new app — Perch.",
+            AutoSize  = true,
+            ForeColor = Theme.Fg,
+        };
+        // An explicit, right-aligned button on its own line so the call to action is unmissable —
+        // the whole card stays clickable too.
+        var openBtn = MakeButton("Open Perch ↗");
+        openBtn.Margin = new Padding(0);
+
+        banner.Controls.Add(accent);
+        banner.Controls.Add(heading);
+        banner.Controls.Add(body);
+        banner.Controls.Add(openBtn);
+
+        void Open() => OpenUrl(PerchUrl);
+        banner.Click  += (_, _) => Open();
+        accent.Click  += (_, _) => Open();
+        heading.Click += (_, _) => Open();
+        body.Click    += (_, _) => Open();
+        openBtn.Click += (_, _) => Open();
+
+        void Layout()
+        {
+            int left    = accent.Width + padX;
+            int innerW  = Math.Max(40, banner.Width - left - padX);
+            heading.Location = new Point(left, padY);
+            body.MaximumSize = new Size(innerW, 0);   // re-wraps the AutoSize label to the card width
+            body.Location    = new Point(left, heading.Bottom + gap);
+            openBtn.Location  = new Point(banner.Width - padX - openBtn.Width, body.Bottom + gap);
+            banner.Height    = openBtn.Bottom + padY;
+        }
+        banner.Resize += (_, _) => Layout();
+        _fluidWidth.Add((banner, 0));
+        Layout();
+
+        return banner;
     }
 
     protected override void Dispose(bool disposing)
