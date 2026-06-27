@@ -1,3 +1,4 @@
+using ClaudeWatch.Data;
 using Velopack;
 
 namespace ClaudeWatch.App;
@@ -41,7 +42,14 @@ internal static class Program
             .Build()
             .OnAfterInstallFastCallback(_ => PathRegistration.Register())
             .OnAfterUpdateFastCallback(_ => PathRegistration.Register())
-            .OnBeforeUninstallFastCallback(_ => PathRegistration.Unregister())
+            // On uninstall, strip the PATH entry and remove the Claude Code plugin + marketplace so
+            // no trace is left behind (this app is being deprecated/renamed). Plugin removal is
+            // best-effort with a tight per-call timeout — it can never hang or fail the uninstall.
+            .OnBeforeUninstallFastCallback(_ =>
+            {
+                PathRegistration.Unregister();
+                PluginManager.RemoveForUninstall();
+            })
             // First launch after an install: flag it so the tray auto-installs the Claude Code
             // plugin. Done here (not in a fast callback) because installing it is a slow network
             // op that needs the running app — and a tray icon — to show progress.

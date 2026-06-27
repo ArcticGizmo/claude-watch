@@ -173,6 +173,65 @@ internal sealed class PluginManager
     }
 
     /// <summary>
+    /// Uninstalls the plugin and removes the marketplace registration — the inverse of
+    /// <see cref="EnableAsync"/>. Used by the settings "Remove" button. Best-effort and idempotent:
+    /// only acts on what's actually present, and removing the marketplace (which can fail if other
+    /// scopes reference it) never fails the operation once the plugin itself is gone.
+    /// </summary>
+    public async Task<(bool ok, string message)> DisableAsync()
+    {
+        if (!await IsCliPresentAsync())
+            return (false, "claude CLI not found on PATH.");
+
+        var (marketplace, plugin) = ReadInstalledState();
+        if (!marketplace && !plugin)
+            return (true, "Claude Code plugin is not installed.");
+
+        if (plugin)
+        {
+            var uninstall = await RunClaudeAsync($"plugin uninstall {PluginId} --scope user");
+            if (uninstall.exitCode != 0)
+                return (false, $"Uninstall failed: {FirstLine(uninstall.output)}");
+        }
+
+        // Omit --scope so the marketplace declaration is dropped from every scope. Best-effort: the
+        // plugin (the part that actually runs) is already gone, so don't fail on a marketplace quirk.
+        if (marketplace)
+            await RunClaudeAsync($"plugin marketplace remove {MarketplaceName}");
+
+        return (
+            true,
+            "Claude Code plugin removed. Restart any open sessions to unload it."
+        );
+    }
+
+    /// <summary>
+    /// Synchronous, best-effort plugin + marketplace removal for the Velopack uninstall hook (which
+    /// runs a plain <see cref="Action"/> as the app is being deprecated/renamed — we want to leave no
+    /// trace). Each CLI call is hard-capped so the uninstaller can never hang on a wedged CLI or
+    /// network, and every failure is swallowed. Idempotent: only acts on what's present.
+    /// </summary>
+    public static void RemoveForUninstall()
+    {
+        try
+        {
+            var (marketplace, plugin) = ReadInstalledState();
+            var cap = TimeSpan.FromSeconds(20);
+
+            if (plugin)
+                RunClaudeAsync($"plugin uninstall {PluginId} --scope user", cap)
+                    .GetAwaiter()
+                    .GetResult();
+
+            if (marketplace)
+                RunClaudeAsync($"plugin marketplace remove {MarketplaceName}", cap)
+                    .GetAwaiter()
+                    .GetResult();
+        }
+        catch { /* uninstall must never fail on best-effort cleanup */ }
+    }
+
+    /// <summary>
     /// Refreshes the marketplace then updates the plugin to the latest version. Returns a
     /// user-facing message.
     /// </summary>
@@ -301,15 +360,19 @@ internal sealed class PluginManager
         return exitCode == 0 ? output.Trim() : null;
     }
 
-    // Runs `claude <args>` via cmd.exe so PATHEXT shims (.exe/.cmd/.bat) all resolve.
-    private static Task<(int exitCode, string output)> RunClaudeAsync(string args) =>
-        RunProcessAsync("cmd.exe", $"/c claude {args}");
+    // Runs `claude <args>` via cmd.exe so PATHEXT shims (.exe/.cmd/.bat) all resolve. An optional
+    // timeout overrides the default for callers (e.g. the uninstall hook) that must fail fast.
+    private static Task<(int exitCode, string output)> RunClaudeAsync(
+        string args,
+        TimeSpan? timeout = null
+    ) => RunProcessAsync("cmd.exe", $"/c claude {args}", timeout);
 
     // Runs a process, capturing combined stdout+stderr, with a hard timeout so a hung CLI/network
     // call can never wedge the UI. A non-zero exit code (including "command not found") is failure.
     private static async Task<(int exitCode, string output)> RunProcessAsync(
         string fileName,
-        string args
+        string args,
+        TimeSpan? timeout = null
     )
     {
         try
@@ -331,7 +394,7 @@ internal sealed class PluginManager
             var stdoutTask = proc.StandardOutput.ReadToEndAsync();
             var stderrTask = proc.StandardError.ReadToEndAsync();
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            using var cts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(120));
             try
             {
                 await proc.WaitForExitAsync(cts.Token);

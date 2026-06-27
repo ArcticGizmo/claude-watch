@@ -403,6 +403,7 @@ internal sealed class SettingsForm : Form
     // Status of the claude-watch plugin and the single action button (Enable / Update / Up to date).
     private Label   _pluginStatusLabel = null!;
     private Button  _pluginActionBtn   = null!;
+    private Button  _pluginRemoveBtn   = null!;
     private Spinner _pluginSpinner     = null!;
     private PluginStatus _pluginStatus = PluginStatus.UpToDate;
 
@@ -433,6 +434,14 @@ internal sealed class SettingsForm : Form
         _pluginActionBtn.Enabled = false;
         _pluginActionBtn.Click += async (_, _) => await RunPluginActionAsync();
         row.Controls.Add(_pluginActionBtn);
+
+        // Removes the plugin + marketplace, for users moving off this (deprecated) app entirely.
+        // Enabled only once a status check confirms something is actually installed.
+        _pluginRemoveBtn = MakeButton("Remove");
+        _pluginRemoveBtn.ForeColor = Theme.Danger;
+        _pluginRemoveBtn.Enabled = false;
+        _pluginRemoveBtn.Click += async (_, _) => await RunPluginRemoveAsync();
+        row.Controls.Add(_pluginRemoveBtn);
 
         _pluginSpinner = new Spinner { Margin = new Padding(2, 4, 0, 0) };
         row.Controls.Add(_pluginSpinner);
@@ -488,11 +497,37 @@ internal sealed class SettingsForm : Form
             _pluginStatusLabel.Text = message;
     }
 
-    // Shows the spinner and disables the button while an async plugin operation is in flight.
+    // Runs the Remove action: uninstalls the plugin and drops the marketplace, then re-checks status.
+    private async Task RunPluginRemoveAsync()
+    {
+        var mgr = new PluginManager();
+        SetPluginBusy("Removing the plugin…");
+
+        var (ok, message) = await mgr.DisableAsync();
+        if (IsDisposed) return;
+
+        if (!ok)
+        {
+            // Surface the failure but re-enable the buttons so the user can retry.
+            _pluginSpinner.Spinning = false;
+            _pluginStatusLabel.Text = message;
+            _pluginActionBtn.Enabled = true;
+            _pluginRemoveBtn.Enabled = true;
+            return;
+        }
+
+        // Re-check so the action button settles back to "Enable" and Remove disables itself.
+        await RefreshPluginStatusAsync();
+        if (!IsDisposed)
+            _pluginStatusLabel.Text = message;
+    }
+
+    // Shows the spinner and disables the buttons while an async plugin operation is in flight.
     private void SetPluginBusy(string message)
     {
         _pluginSpinner.Spinning  = true;
         _pluginActionBtn.Enabled = false;
+        _pluginRemoveBtn.Enabled = false;
         _pluginStatusLabel.Text  = message;
     }
 
@@ -501,6 +536,11 @@ internal sealed class SettingsForm : Form
     {
         _pluginStatus = status;
         _pluginSpinner.Spinning = false;
+
+        // Remove is offered whenever the CLI is reachable and there's actually something installed
+        // (marketplace and/or plugin) to tear down.
+        var (marketplace, plugin) = PluginManager.ReadInstalledState();
+        _pluginRemoveBtn.Enabled = status != PluginStatus.CliMissing && (marketplace || plugin);
 
         switch (status)
         {

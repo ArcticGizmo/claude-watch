@@ -55,6 +55,11 @@ if ($action -eq 'start') {
   # anyway, so skip it — this is also our "no other session has it open yet" check.
   if (Get-Process claude-watch -ErrorAction SilentlyContinue) { exit 0 }
 
+  # Self-heal: if claude-watch no longer resolves (app uninstalled — the installer also strips its
+  # PATH entry), don't attempt a doomed Start-Process. The plugin then sits inert until removed,
+  # rather than failing to spawn a missing exe on every session start.
+  if (-not (Get-Command claude-watch -ErrorAction SilentlyContinue)) { exit 0 }
+
   # --autostarted tells the tray it was launched by this hook, so it knows it's allowed to auto-close
   # itself after the last session ends (a manually-opened tray never self-closes).
   Start-Process 'claude-watch' -ArgumentList '--autostarted' -ErrorAction SilentlyContinue
