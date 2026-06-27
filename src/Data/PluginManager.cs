@@ -229,6 +229,16 @@ internal sealed class PluginManager
                     .GetResult();
         }
         catch { /* uninstall must never fail on best-effort cleanup */ }
+
+        // Delete the app's own roaming data dir (settings.json) so nothing is left behind. Separate
+        // try/catch: a CLI failure above must not skip this, and a delete failure must not fail the
+        // uninstall.
+        try
+        {
+            if (Directory.Exists(AppSettings.DataDirectory))
+                Directory.Delete(AppSettings.DataDirectory, recursive: true);
+        }
+        catch { }
     }
 
     /// <summary>

@@ -5,9 +5,16 @@ using System.Text.Json.Serialization;
 
 internal sealed class AppSettings
 {
-    private static readonly string FilePath = Path.Combine(
+    /// <summary>
+    /// <c>%APPDATA%\ClaudeWatch</c> — the app's own roaming data directory (just <c>settings.json</c>
+    /// today). Distinct from the Velopack install dir under <c>%LocalAppData%</c>, so it can be safely
+    /// deleted wholesale when the app is uninstalled. Exposed so the uninstall hook can leave no trace.
+    /// </summary>
+    public static string DataDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "ClaudeWatch", "settings.json");
+        "ClaudeWatch");
+
+    private static readonly string FilePath = Path.Combine(DataDirectory, "settings.json");
 
     // Whether to show (and fetch, via the OAuth /usage endpoint) the session/weekly usage bars.
     // Defaults to true; a missing key in an older settings file keeps this default.
